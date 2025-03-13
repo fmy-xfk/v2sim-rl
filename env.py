@@ -66,7 +66,6 @@ class _drl12env:
         Path(self._res_path).mkdir(parents=True, exist_ok=True)
         self.__create_inst()
         
-
     def _get_bus_overlim(self):
         s = 0.0
         for b in self._buses:
@@ -214,7 +213,10 @@ class Nodes12Env(gym.Env):
         self._par.send(('q', None))
     
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except:
+            pass
         self._p.join()
     
 gym.register(id="v2sim/Nodes12-v0", entry_point=Nodes12Env) # type:ignore

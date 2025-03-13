@@ -1,6 +1,7 @@
 # V2Sim-RL 在V2Sim平台上进行强化学习
 
-内部介绍，请勿外传
+<p style="text-align:center;font-weight:bold">内部介绍，请勿外传</p>
+
 
 从前有一个平台，叫V2Sim，用于交通网和配电网的联合仿真。
 
@@ -10,7 +11,7 @@
 
 最基本的，需要会用Git、GitHub、Python和某种编辑器（例如VSCode、Anaconda或PyCharm）。
 
-然后，需要了解深度学习(Deep Learning, DL)、强化学习(Reinforcement Learning, RL)和深度强化学习(Deep RL, DRL)，了解常用的算法。本项目目前使用Soft Actor-Critic (SAC)算法。
+然后，需要了解深度学习(Deep Learning, DL)、强化学习(Reinforcement Learning, RL)和深度强化学习(Deep RL, DRL)，了解常用的算法。本项目目前使用Soft Actor-Critic (SAC)算法，可以参考[OpenAI的教程](https://spinningup.openai.com/en/latest/algorithms/sac.html)
 
 其次，需要了解强化学习常用的Python库Gymnaisum（简称Gym）。本项目目前把V2Sim平台上的12nodes的例子封装成了Gym环境。
 
@@ -41,9 +42,19 @@ python setup.py develop
 + 主程序是`sac.py`(从spinningup里面copy过来修改的)，输入`python sac.py`以运行
 + V2Sim环境是`env.py`
 + SAC的核心程序在`core.py`(从spinningup里面copy过来的)
++ 绘图程序是`plot.py`
 + 其他杂项在`utils.py`里面(从spinningup里面copy过来修改的)
 
-记观测数据维度为$N_o$，动作维度为$N_a$，则
+### 参数说明
++ observation: 所有道路的车辆密度(`车辆数/给定容量`) + 所有充电站排队情况(`总车辆数/充电桩数-1`)
++ action: 12维向量，每一维从0.0~5.0，表示充电站的定价。注意：每一维依次对应CS1,CS10,CS11,CS12,CS2,CS3,...,CS9，这是由于字典序导致的。
++ reward: `-(总电压越限*1e5 + 各站排队比例之和*100 + 正在行驶的车辆数/100)`, 其中`排队比例 = 等待车辆数/充电桩数`
 
-+ Actor网络：
-+ Critic网络：包括2个结构相同Q网络。每个Q网络都是一个多层感知器(MLP)，默认维度依次为$(N_o+N_a,256,256,1)$，这里两个256是两个hidden layer，可以通过命令行调整，比如变成3个128的命令行为`python sac.py -hid 128 -l 3`，此时维度依次为$(N_o+N_a,128,128,128,1)$
+Actor网络和Critic网络的结构都是多层感知器(MLP)。可以通过命令行修改MLP的隐含层的维度和层数，例如`python sac.py -hid 128 -l 3`表示隐含层数为3，每层128个神经元。默认为2层，每层256个神经元。
+
+V2Sim仿真步长15s，作为DRL的环境的步长60s(即V2Sim走4步)。
+
+### 现有问题和可能的改进方向
+SAC只跑50个epoch效果太差，跑的多了速度太慢。
+
+可以考虑并行DRL，需要调研一下。
