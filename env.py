@@ -2,6 +2,7 @@
 Environment for the 12-node V2Sim case
 '''
 from itertools import chain
+from multiprocessing.connection import PipeConnection
 from pathlib import Path
 import time, random
 from typing import Optional
@@ -9,13 +10,14 @@ import gymnasium as gym
 import numpy as np
 import libsumo
 import v2sim
+import multiprocessing as mp
 
 START_TIME = 115200 # 08:00:00
-FINAL_TIME = 129600 # 12:00:00 #86400*8
+FINAL_TIME = 122400 # 10:00:00 #129600 # 12:00:00
 INTERVAL = 60 # 1min
 STEPS_PER_SIM = (FINAL_TIME - START_TIME) // INTERVAL
 
-class Nodes12Env(gym.Env):
+class _drl12env:
     def __create_inst(self):
         self._inst = v2sim.V2SimInstance(
             cfgdir = self._case_path,
@@ -63,14 +65,6 @@ class Nodes12Env(gym.Env):
         self._res_path = res_path
         Path(self._res_path).mkdir(parents=True, exist_ok=True)
         self.__create_inst()
-
-        # Observation space: 40 dims of number of vehicles on the road, and 12 dims of number of vehicles in the FCS
-        self.observation_space = gym.spaces.Box(-1.0, 5.0, (40 + 12,), seed = seed)
-
-        # Action space: Price of the 12 FCS
-        self.action_space = gym.spaces.Box(0.0, 5.0, (12,), seed = seed)
-
-        self._rst_cnt = 0
         
 
     def _get_bus_overlim(self):
@@ -110,17 +104,13 @@ class Nodes12Env(gym.Env):
     def _get_info(self):
         return {}
     
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
-        # We need the following line to seed self.np_random
-        super().reset(seed=seed)
-
+    def reset(self):
         if self._inst.is_working:
             #print("[ATTN] Stop the instance")
             self._inst.stop()
             time.sleep(1) # Wait for the instance to stop. Never remove this line!
         self.__create_inst()
         self._t = 0
-        self._rst_cnt += 1
 
         observation = self._get_obs()
         info = self._get_info()
@@ -128,14 +118,13 @@ class Nodes12Env(gym.Env):
         return observation, info
     
     def step(self, action:np.ndarray):
-        assert isinstance(action, np.ndarray) and action.shape == (12, )
-        self._t += INTERVAL
+        assert action.shape == (12, )
         for i, v in enumerate(action):
             self._inst.fcs[i].pbuy.setOverride(v)
         try:
-            self._inst.step_until(self._t)
+            self._t = self._inst.step_until(self._t + INTERVAL)
         except Exception as e:
-            print("\nNodes12Env Error @", self._t, "  Reset count:", self._rst_cnt)
+            print("\nNodes12Env Error @", self._t)
             raise e
         if self._t >= self._inst.etime:
             terminated = True
@@ -155,15 +144,88 @@ class Nodes12Env(gym.Env):
         info = self._get_info()
 
         return observation, reward, terminated, truncated, info
+    
+    def _mainloop(self, q:PipeConnection):
+        while True:
+            try:
+                op, data = q.recv()
+            except EOFError:
+                break
+            if op == 's':
+                q.send(self.step(data))
+            elif op == 'r':
+                q.send(self.reset())
+            elif op == 'o':
+                q.send(self._get_obs())
+            elif op == 'ct':
+                q.send(self._inst.ctime)
+            elif op == 'q':
+                break
+            else:
+                raise ValueError(f"Unknown operation {op}")
+    
+    @staticmethod
+    def _worker(q:PipeConnection, *args, **kwargs):
+        env = _drl12env(*args, **kwargs)
+        env._mainloop(q)
 
+class Nodes12Env(gym.Env):
+    def __init__(self, seed:int = 0, res_path:str = "", road_cap:float = 500.0, SoC_change:bool = True):
+        super().__init__()
+        # Observation space: 40 dims of number of vehicles on the road, and 12 dims of number of vehicles in the FCS
+        self.observation_space = gym.spaces.Box(-1.0, 5.0, (40 + 12,), seed = seed)
+        # Action space: Price of the 12 FCS
+        self.action_space = gym.spaces.Box(0.0, 5.0, (12,), seed = seed)
+
+        self._par, chd = mp.Pipe()
+        self._p = mp.Process(target=_drl12env._worker, args=(chd, seed, res_path, road_cap, SoC_change))
+        self._p.start()
+
+        self.__rst_cnt = 0
+    
+    @property
+    def reset_count(self):
+        return self.__rst_cnt
+    
+    @property
+    def ctime(self) -> int:
+        self._par.send(('ct', None))
+        self._par.poll()
+        return self._par.recv()
+    
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> tuple[np.ndarray, dict]:
+        super().reset(seed=seed)
+        self._par.send(('r', None))
+        self.__rst_cnt += 1
+        self._par.poll()
+        return self._par.recv()
+    
+    def step(self, action:np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
+        self._par.send(('s', action))
+        self._par.poll()
+        return self._par.recv()
+    
+    def observe(self) -> np.ndarray:
+        self._par.send(('o', None))
+        self._par.poll()
+        return self._par.recv()
+    
+    def close(self):
+        self._par.send(('q', None))
+    
+    def __del__(self):
+        self.close()
+        self._p.join()
+    
 gym.register(id="v2sim/Nodes12-v0", entry_point=Nodes12Env) # type:ignore
 
 if __name__ == "__main__":
-    env = gym.make("v2sim/Nodes12-v0")
-    obs, _ = env.reset()
-    print(obs)
+    env = Nodes12Env()
+    #obs, _ = env.reset()
+    #print(obs)
     terminated = False
     price = np.array([1.0]*12)
     while not terminated:
         obs, reward, terminated, _, _ = env.step(price)
-        print(reward)
+        print(env.ctime, reward)
+    env.close()

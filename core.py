@@ -1,4 +1,4 @@
-from typing import Iterable
+from typing import Any, Iterable, Sequence
 import numpy as np
 import torch
 import torch.nn as nn
@@ -28,7 +28,7 @@ LOG_STD_MIN = -20
 
 class SquashedGaussianMLPActor(nn.Module):
 
-    def __init__(self, obs_dim:int, act_dim:int, hidden_sizes:Iterable[int], activation:nn.Module, act_limit:float):
+    def __init__(self, obs_dim:int, act_dim:int, hidden_sizes:Sequence[int], activation:Any, act_limit:float):
         super().__init__()
         self.net = mlp([obs_dim] + list(hidden_sizes), activation, activation)
         self.mu_layer = nn.Linear(hidden_sizes[-1], act_dim)
@@ -68,7 +68,7 @@ class SquashedGaussianMLPActor(nn.Module):
 
 
 class MLPQFunction(nn.Module):
-    def __init__(self, obs_dim:int, act_dim:int, hidden_sizes:Iterable[int], activation:nn.Module):
+    def __init__(self, obs_dim:int, act_dim:int, hidden_sizes:Iterable[int], activation:Any):
         super().__init__()
         self.q = mlp([obs_dim + act_dim] + list(hidden_sizes) + [1], activation)
 
@@ -78,10 +78,11 @@ class MLPQFunction(nn.Module):
 
 
 class MLPActorCritic(nn.Module):
-    def __init__(self, observation_space:gym.spaces.Box, action_space:gym.spaces.Box, hidden_sizes=(256,256),
+    def __init__(self, observation_space:gym.spaces.Space, action_space:gym.spaces.Box, hidden_sizes=(256,256),
                  activation=nn.ReLU):
         super().__init__()
 
+        assert isinstance(observation_space, gym.spaces.Box)
         obs_dim = observation_space.shape[0]
         act_dim = action_space.shape[0]
         act_limit = action_space.high[0]

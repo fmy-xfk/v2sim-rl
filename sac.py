@@ -8,7 +8,6 @@ import time
 import core
 from env import *
 from utils import EpochLogger, time2str
-import multiprocessing as mp
 
 class ReplayBuffer:
     """
@@ -16,9 +15,9 @@ class ReplayBuffer:
     """
 
     def __init__(self, obs_dim, act_dim, size):
-        self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
-        self.obs2_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
-        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32)
+        self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32) #type: ignore
+        self.obs2_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32) #type: ignore
+        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32) #type: ignore
         self.rew_buf = np.zeros(size, dtype=np.float32)
         self.done_buf = np.zeros(size, dtype=np.float32)
         self.ptr, self.size, self.max_size = 0, 0, size
@@ -41,39 +40,14 @@ class ReplayBuffer:
                      done=self.done_buf[idxs])
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in batch.items()}
 
-def test_agent(num_test_episodes:int, max_ep_len:int, slave):
-    test_env = create_env("./test_temp")
-    for j in range(num_test_episodes):
-        print(f"\nTest Agent - Epoch {j}")
-        o, _ = test_env.reset()
-        d, ep_ret, ep_len = False, 0, 0
-        this_st = time.time()
-        last_print_time = -1
-        while not(d or (ep_len == max_ep_len)):
-            # Take deterministic actions at test time 
-            slave.send(["GET", o])
-            slave.poll()
-            action = slave.recv()
-            o, r, d, _, _ = test_env.step(action)
-            cur_time = time.time()
-            if ep_len > 0 and cur_time - last_print_time > 1:
-                dur = cur_time - this_st
-                rem = dur / ep_len * (max_ep_len - ep_len)
-                print(f"{ep_len}/{max_ep_len}, Used: {time2str(dur)}, EST: {time2str(rem)}", end = "\r")
-                last_print_time = cur_time
-            ep_ret += r
-            ep_len += 1
-        slave.send(["LOG", ep_ret, ep_len])
-    slave.send(["END"])
-
 def create_env(obj):
     #return gym.make("Pendulum-v1")
     return Nodes12Env(res_path=obj)
 
 def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
-        steps_per_epoch=1000, epochs=100, replay_size=int(1e6), gamma=0.99, 
+        steps_per_epoch=6000, epochs=100, replay_size=int(1e6), gamma=0.99, 
         polyak=0.995, lr=1e-3, alpha=0.2, batch_size=100, start_steps=10000, 
-        update_after=500, update_every=50, num_test_episodes=1, max_ep_len=1000, 
+        update_after=1200, update_every=50, num_test_episodes=1, max_ep_len=1000, 
         logger_kwargs=dict(), save_freq=1):
     """
     Soft Actor-Critic (SAC)
@@ -293,28 +267,36 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     def get_action(o, deterministic=False):
         return ac.act(torch.as_tensor(o, dtype=torch.float32), deterministic)
 
-    def test_agent_inner():
-        master, slave = mp.Pipe()
-        p = mp.Process(target = test_agent, args=(num_test_episodes, max_ep_len, slave))
-        p.start()
-        while True:
-            master.poll()
-            msg = master.recv()
-            if msg[0] == "GET":
-                o = msg[1]
-                a = ac.act(torch.as_tensor(o, dtype=torch.float32), True)
-                master.send(a)
-            elif msg[0] == "LOG":
-                ep_ret, ep_len = msg[1], msg[2]
-                logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
+    def test_agent(num_test_episodes:int, max_ep_len:int):
+        test_env = create_env("./test_temp")
+        print("\n")
+        for j in range(num_test_episodes):
+            if j == 0:
+                o = test_env.observe()
             else:
-                break
-        p.join()
+                o, _ = test_env.reset()
+            d, ep_ret, ep_len = False, 0, 0
+            this_st = time.time()
+            last_print_time = -1
+            while not(d or (ep_len == max_ep_len)):
+                # Take deterministic actions at test time
+                action = ac.act(torch.as_tensor(o, dtype=torch.float32), True)
+                o, r, d, _, _ = test_env.step(action)
+                cur_time = time.time()
+                if ep_len > 0 and cur_time - last_print_time > 1:
+                    dur = cur_time - this_st
+                    rem = dur / ep_len * (max_ep_len - ep_len)
+                    print(f"TestEp {j}: {ep_len}/{max_ep_len}, Used: {time2str(dur)}, EST: {time2str(rem)}", end = "\r")
+                    last_print_time = cur_time
+                ep_ret += r
+                ep_len += 1
+            logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
+        test_env.close()
     
     # Prepare for interaction with environment
     total_steps = steps_per_epoch * epochs
     start_time = time.time()
-    o, _ = env.reset()
+    o = env.observe()
     ep_ret, ep_len = 0, 0
     
     st_time = time.time()
@@ -325,7 +307,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         if cur_time - last_print_time > 1 and t > 0:
             dur = cur_time - st_time
             rem = (total_steps - t) * (dur / t)
-            print(f"STEPS: {t}, SIM_TIME: {env._rst_cnt}-{env._inst.ctime}, Used: {time2str(dur)}, EST: {time2str(rem)}  ", end="\r")
+            print(f"STEPS: {t}, SIM_TIME: {env.reset_count}-{env.ctime}, Used: {time2str(dur)}, EST: {time2str(rem)}  ", end="\r")
             last_print_time = cur_time
         # Until start_steps have elapsed, randomly sample actions
         # from a uniform distribution for better exploration. Afterwards, 
@@ -374,7 +356,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             #    logger.save_state({'env': env}, None)
 
             # Test the performance of the deterministic version of the agent.
-            test_agent_inner()
+            test_agent(num_test_episodes, max_ep_len)
 
             # Log info about epoch
             logger.log_tabular('Epoch', epoch)
