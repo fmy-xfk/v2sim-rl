@@ -1,4 +1,3 @@
-torch
 gymnasium
 joblib
-v2sim
+feasytools

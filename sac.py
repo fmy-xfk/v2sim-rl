@@ -370,26 +370,28 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             logger.log_tabular('LogPi', with_min_and_max=True)
             logger.log_tabular('LossPi', average_only=True)
             logger.log_tabular('LossQ', average_only=True)
-            logger.log_tabular('Time', time.time()-start_time)
+            logger.log_tabular('Time', time.time() - start_time)
             logger.dump_tabular()
 
 if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--hid', type=int, default=256)
-    parser.add_argument('--l', type=int, default=2)
-    parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--seed', '-s', type=int, default=0)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--exp_name', type=str, default='sac')
-    args = parser.parse_args()
+    from feasytools import ArgChecker
+    args = ArgChecker()
+    hidden_size0 = args.pop_int("hid", 256)
+    hidden_layer = args.pop_int("l", 2)
+    seed = args.pop_int("s", 0)
+    exp_name = args.pop_str("exp_name", "sac")
+    epochs = args.pop_int("epochs", 50)
 
     from utils import setup_logger_kwargs
-    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
+    logger_kwargs = setup_logger_kwargs(f"{exp_name}_hid{hidden_size0}x{hidden_layer}_ep{epochs}", seed)
 
     torch.set_num_threads(torch.get_num_threads())
 
-    sac(actor_critic=core.MLPActorCritic,
-        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), 
-        gamma=args.gamma, seed=args.seed, epochs=args.epochs,
-        logger_kwargs=logger_kwargs)
+    sac(
+        actor_critic=core.MLPActorCritic,
+        ac_kwargs=dict(hidden_sizes=[hidden_size0] * hidden_layer), 
+        gamma=args.pop_float("gamma", 0.99),
+        seed=seed,
+        epochs=epochs,
+        logger_kwargs=logger_kwargs
+    )
