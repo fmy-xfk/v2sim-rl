@@ -8,23 +8,18 @@ import time, random
 from typing import Optional
 import gymnasium as gym
 import numpy as np
-import libsumo
+import libsumo, os
 import v2sim
 import multiprocessing as mp
 
-START_TIME = 115200 # 08:00:00
-FINAL_TIME = 122400 # 10:00:00 #129600 # 12:00:00
-INTERVAL = 60 # 1min
-STEPS_PER_SIM = (FINAL_TIME - START_TIME) // INTERVAL
-
-class _drl12env:
+class _drlenv:
     def __create_inst(self):
         self._inst = v2sim.V2SimInstance(
             cfgdir = self._case_path,
             outdir = self._res_path, 
-            traffic_step = 15, 
-            start_time = START_TIME, # Useless, will be covered by case initial state
-            end_time = FINAL_TIME,
+            traffic_step = self._traffic_step,
+            start_time = 0, # Useless, will be covered by case initial state
+            end_time = self._end_time,
             log = "",
             silent = True,
             seed = random.randint(0, 1000000),
@@ -40,10 +35,9 @@ class _drl12env:
                 ev._elec *= random.uniform(0.8, 1.2)
                 ev._elec = min(ev._elec, ev._bcap)
                 ev._elec = max(ev._elec, 0.0)
-        
+        self._cs_cnt = len(self._inst.fcs)
         self._inst.start()
         self._inst.step()
-        #print("[INFO] Nodes12Env instance created", self._inst.ctime)
         self._enames = [e for e in self._inst.edge_names if not e.startswith("CS")]
         self._t = 0
         if self._inst.pdn:
@@ -57,12 +51,23 @@ class _drl12env:
         else:
             self._buses = []
     
-    def __init__(self, seed:int = 0, res_path:str = "", road_cap:float = 500.0, SoC_change:bool = True):
+    def __init__(self, 
+            case_path:str,
+            end_time:int,
+            traffic_step:int = 15,
+            rl_step:int = 4,
+            res_path:str = "",
+            road_cap:float = 500.0,
+            SoC_change:bool = True
+        ):
         self._SoC_change = SoC_change
         self.road_cap = road_cap
-        self._case_path = str(Path(__file__).parent / "cases/drl_12nodes")
-        self._case_state = self._case_path + "/saved_state"
+        self._case_path = case_path
+        self._case_state = os.path.join(self._case_path, "saved_state")
         self._res_path = res_path
+        self._end_time = end_time
+        self._traffic_step = traffic_step
+        self._rl_step = rl_step
         Path(self._res_path).mkdir(parents=True, exist_ok=True)
         self.__create_inst()
         
@@ -105,9 +110,8 @@ class _drl12env:
     
     def reset(self):
         if self._inst.is_working:
-            #print("[ATTN] Stop the instance")
             self._inst.stop()
-            time.sleep(1) # Wait for the instance to stop. Never remove this line!
+            time.sleep(0.5) # Wait for the instance to stop. Never remove this line!
         self.__create_inst()
         self._t = 0
 
@@ -117,13 +121,15 @@ class _drl12env:
         return observation, info
     
     def step(self, action:np.ndarray):
-        assert action.shape == (12, )
+        assert action.shape == (self._cs_cnt, )
         for i, v in enumerate(action):
             self._inst.fcs[i].pbuy.setOverride(v)
         try:
-            self._t = self._inst.step_until(self._t + INTERVAL)
+            self._t = self._inst.step_until(
+                self._t + self._traffic_step * self._rl_step
+            )
         except Exception as e:
-            print("\nNodes12Env Error @", self._t)
+            print("\nV2SimEnv Error @", self._t)
             raise e
         if self._t >= self._inst.etime:
             terminated = True
@@ -158,6 +164,10 @@ class _drl12env:
                 q.send(self._get_obs())
             elif op == 'ct':
                 q.send(self._inst.ctime)
+            elif op == 'cf':
+                q.send(self._cs_cnt)
+            elif op == 'ce':
+                q.send(len(self._enames))
             elif op == 'q':
                 break
             else:
@@ -165,27 +175,56 @@ class _drl12env:
     
     @staticmethod
     def _worker(q:PipeConnection, *args, **kwargs):
-        env = _drl12env(*args, **kwargs)
+        env = _drlenv(*args, **kwargs)
         env._mainloop(q)
 
-class Nodes12Env(gym.Env):
-    def __init__(self, seed:int = 0, res_path:str = "", road_cap:float = 500.0, SoC_change:bool = True):
+class V2SimEnv(gym.Env):
+    def __init__(self, 
+            case_path:str,
+            end_time:int,
+            traffic_step:int = 15,
+            rl_step:int = 4,            
+            res_path:str = "",
+            road_cap:float = 100.0,
+            SoC_change:bool = True,
+            seed:int = 0,
+        ):
         super().__init__()
-        # Observation space: 40 dims of number of vehicles on the road, and 12 dims of number of vehicles in the FCS
-        self.observation_space = gym.spaces.Box(-1.0, 5.0, (40 + 12,), seed = seed)
-        # Action space: Price of the 12 FCS
-        self.action_space = gym.spaces.Box(0.0, 5.0, (12,), seed = seed)
-
         self._par, chd = mp.Pipe()
-        self._p = mp.Process(target=_drl12env._worker, args=(chd, seed, res_path, road_cap, SoC_change))
+        self._p = mp.Process(target=_drlenv._worker, args=(
+            chd, case_path, end_time, traffic_step, rl_step, res_path, road_cap, SoC_change),
+        daemon=True)
         self._p.start()
 
         self.__rst_cnt = 0
+
+        self._par.send(('cf', None))
+        self._par.poll()
+        self.__cs_cnt = self._par.recv()
+        assert isinstance(self.__cs_cnt, int) and self.__cs_cnt > 0
+
+        self._par.send(('ce', None))
+        self._par.poll()
+        self.__e_cnt = self._par.recv()
+        assert isinstance(self.__e_cnt, int) and self.__e_cnt > 0
+
+        # Observation space: N dims of number of vehicles on the road, and M dims of number of vehicles in the FCS
+        self.observation_space = gym.spaces.Box(-1.0, 5.0, (self.__e_cnt + self.__cs_cnt,), seed = seed)
+        # Action space: Price of the 12 FCS
+        self.action_space = gym.spaces.Box(0.0, 5.0, (self.__cs_cnt,), seed = seed)
     
     @property
     def reset_count(self):
         return self.__rst_cnt
     
+    @property
+    def cs_count(self):
+        return self.__cs_cnt
+    
+    @property
+    def edge_count(self):
+        return self.__e_cnt
+
     @property
     def ctime(self) -> int:
         self._par.send(('ct', None))
@@ -219,14 +258,14 @@ class Nodes12Env(gym.Env):
             pass
         self._p.join()
     
-gym.register(id="v2sim/Nodes12-v0", entry_point=Nodes12Env) # type:ignore
+gym.register(id="v2sim/v2simenv-v0", entry_point=V2SimEnv) # type:ignore
 
 if __name__ == "__main__":
-    env = Nodes12Env()
+    env = V2SimEnv("cases/drl_2cs", 122400)
     #obs, _ = env.reset()
     #print(obs)
     terminated = False
-    price = np.array([1.0]*12)
+    price = np.array([1.0]*env.cs_count)
     while not terminated:
         obs, reward, terminated, _, _ = env.step(price)
         print(env.ctime, reward)

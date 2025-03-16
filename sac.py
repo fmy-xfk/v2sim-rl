@@ -42,7 +42,8 @@ class ReplayBuffer:
 
 def create_env(obj):
     #return gym.make("Pendulum-v1")
-    return Nodes12Env(res_path=obj)
+    mcase = str(Path(__file__).parent / "cases" / G_CASE)
+    return V2SimEnv(mcase, G_ET, G_TS, G_RLS, res_path=obj)
 
 def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=6000, epochs=100, replay_size=int(1e6), gamma=0.99, 
@@ -276,7 +277,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         if (t+1) % steps_per_epoch == 0:
             epoch = (t+1) // steps_per_epoch
 
-            # Save model: ATTN: Nodes12Env cannot be saved!
+            # Save model: ATTN: NV2SimEnv cannot be saved!
             # if (epoch % save_freq == 0) or (epoch == epochs):
             #    logger.save_state({'env': env}, None)
 
@@ -303,15 +304,37 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 if __name__ == '__main__':
     from feasytools import ArgChecker
     args = ArgChecker()
+
+    # Case
+    G_CASE = args.pop_str("d", "drl_2cs")
+
+    # End time
+    G_ET = args.pop_int("e", 122400)
+
+    # Traffic step
+    G_TS = args.pop_int("ts", 15)
+
+    # Reinforcement learning step: How many traffic steps per RL step
+    G_RLS = args.pop_int("rls", 4)
+
+    # Road capacity
+    G_RC = args.pop_float("rc", 100)
+
+    # Hidden size
     hidden_size0 = args.pop_int("hid", 256)
+
+    # Hidden layer
     hidden_layer = args.pop_int("l", 2)
+
+    # Seed
     seed = args.pop_int("s", 0)
-    exp_name = args.pop_str("exp_name", "sac")
-    epochs = args.pop_int("epochs", 50)
+    
+    # Epochs
+    epochs = args.pop_int("epochs", 200)
 
     from utils import setup_logger_kwargs
-    logger_kwargs = setup_logger_kwargs(f"{exp_name}_hid{hidden_size0}x{hidden_layer}_ep{epochs}", seed)
-
+    logger_kwargs = setup_logger_kwargs(f"{G_CASE}_hid{hidden_size0}x{hidden_layer}_ep{epochs}", seed)
+    
     torch.set_num_threads(torch.get_num_threads())
     
     sac(
