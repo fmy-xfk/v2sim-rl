@@ -87,6 +87,19 @@ class _drlenv:
     def _get_road_density(self):
         return (libsumo.edge.getLastStepVehicleNumber(e)/self.road_cap for e in self._enames)
 
+    def _get_road_avg_soc(self):
+        ret = []
+        for e in self._enames:
+            cnt = 0
+            sum_soc = 0
+            for vid in libsumo.edge.getLastStepVehicleIDs(e):
+                v = self._inst.vehicles[vid]
+                sum_soc += v.SOC
+                cnt += 1
+            if cnt == 0: ret.append(0)
+            else: ret.append(sum_soc / cnt)
+        return ret
+    
     def _get_fcs_vcnt(self):
         return [c.veh_count() for c in self._inst.fcs]
     
@@ -99,9 +112,27 @@ class _drlenv:
     def _get_fcs_wait_rate(self):
         return [c.wait_count()/c.slots for c in self._inst.fcs]
     
+    def _get_fcs_avg_soc(self):
+        ret = []
+        for c in self._inst.fcs:
+            cnt = 0
+            sum_soc = 0
+            for vid in c.vehicles():
+                v = self._inst.vehicles[vid]
+                sum_soc += v.SOC
+                cnt += 1
+            if cnt == 0: ret.append(0)
+            else: ret.append(sum_soc / cnt)
+        return ret
+    
     def _get_obs(self):
         return np.array(
-            list(chain(self._get_road_density(), self._get_fcs_usage())),
+            list(chain(
+                self._get_road_density(),
+                self._get_road_avg_soc(),
+                self._get_fcs_usage(),
+                self._get_fcs_avg_soc(),
+            )),
             dtype = np.float32
         )
     
@@ -209,7 +240,7 @@ class V2SimEnv(gym.Env):
         assert isinstance(self.__e_cnt, int) and self.__e_cnt > 0
 
         # Observation space: N dims of number of vehicles on the road, and M dims of number of vehicles in the FCS
-        self.observation_space = gym.spaces.Box(-1.0, 5.0, (self.__e_cnt + self.__cs_cnt,), seed = seed)
+        self.observation_space = gym.spaces.Box(-1.0, 5.0, (self.__e_cnt * 2 + self.__cs_cnt * 2,), seed = seed)
         # Action space: Price of the 12 FCS
         self.action_space = gym.spaces.Box(0.0, 5.0, (self.__cs_cnt,), seed = seed)
     
@@ -261,7 +292,11 @@ class V2SimEnv(gym.Env):
 gym.register(id="v2sim/v2simenv-v0", entry_point=V2SimEnv) # type:ignore
 
 if __name__ == "__main__":
-    env = V2SimEnv("cases/drl_2cs", 122400)
+    import feasytools as ft
+    args = ft.ArgChecker()
+    mcase = args.pop_str("d", "drl_12nodes")
+    et = args.pop_int("t", 129600)
+    env = V2SimEnv(str(Path("./cases") / mcase), et)
     #obs, _ = env.reset()
     #print(obs)
     terminated = False

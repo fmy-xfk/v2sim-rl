@@ -45,11 +45,23 @@ def create_env(obj):
     mcase = str(Path(__file__).parent / "cases" / G_CASE)
     return V2SimEnv(mcase, G_ET, G_TS, G_RLS, res_path=obj)
 
-def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
-        steps_per_epoch=6000, epochs=100, replay_size=int(1e6), gamma=0.99, 
-        polyak=0.995, lr=1e-3, alpha=0.2, adaptive_alpha=True, batch_size=100, start_steps=10000, 
-        update_after=1200, update_every=50, num_test_episodes=10, max_ep_len=1000, 
-        logger_kwargs=dict(), save_freq=1):
+def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
+        seed=0, 
+        steps_per_epoch=6000,   # Number of steps of interaction (state-action pairs) for the agent and the environment in each epoch
+        epochs=100,             # Number of epochs to run
+        replay_size=int(1e6),   # Size of the replay buffer
+        gamma=0.99,             # Discount factor
+        polyak=0.995,           # Interpolation factor in polyak averaging for target networks
+        lr=1e-3,                # Learning rate for both actor and critic
+        alpha=0.2,              # Entropy regularization coefficient
+        adaptive_alpha=True,    # Whether to use adaptive entropy coefficient
+        batch_size=100,         # Number of episodes to optimize at the same time
+        start_steps=10000,      # Number of steps for uniform-random action selection, before running real policy.
+        update_after=1000,      # Number of env interactions to collect before starting to do gradient descent updates.
+        update_every=50,        # Number of env interactions that should elapse between gradient descent updates.
+        num_test_episodes=10,   # Number of episodes to test the deterministic policy at the end of each epoch.
+        max_ep_len=1000,        # Maximum length of trajectory / episode / rollout
+        logger_kwargs=dict()):
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
 
@@ -306,10 +318,10 @@ if __name__ == '__main__':
     args = ArgChecker()
 
     # Case
-    G_CASE = args.pop_str("d", "drl_2cs")
+    G_CASE = args.pop_str("d", "drl_12nodes")
 
     # End time
-    G_ET = args.pop_int("e", 122400)
+    G_ET = args.pop_int("e", 129600)
 
     # Traffic step
     G_TS = args.pop_int("ts", 15)
