@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import os, feasytools
+import os
+from feasytools import ReadOnlyTable, DTypeEnum
 
 def plot(xmean, xmax, xmin, xtestmean, xtestmax, xtestmin, title, xlabel, ylabel, save_to):
     x = np.arange(0, len(xmean), 1)
@@ -21,7 +22,7 @@ def find_progress_csv(directory):
         for file in files:
             if file == "progress.csv":
                 dir = os.path.join(root, file)
-                tb = feasytools.ReadOnlyTable(dir, dtype=np.float32)
+                tb = ReadOnlyTable(dir, dtype=DTypeEnum.FLOAT32)
                 plot(
                     tb.col("AverageEpRet"), tb.col("MaxEpRet"), tb.col("MinEpRet"),
                     tb.col("AverageTestEpRet"), tb.col("MaxTestEpRet"), tb.col("MinTestEpRet"),

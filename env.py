@@ -5,7 +5,7 @@ from itertools import chain
 from multiprocessing.connection import PipeConnection
 from pathlib import Path
 import time, random
-from typing import Optional
+from typing import Any, Optional
 import gymnasium as gym
 import numpy as np
 import libsumo, os
@@ -205,11 +205,39 @@ class _drlenv:
                 raise ValueError(f"Unknown operation {op}")
     
     @staticmethod
+    def __exit(q:PipeConnection):
+        import traceback
+        traceback.print_exc()
+        try:
+            q.send('__error__')
+        except Exception as e:
+            pass
+
+    @staticmethod
     def _worker(q:PipeConnection, *args, **kwargs):
-        env = _drlenv(*args, **kwargs)
-        env._mainloop(q)
+        try:
+            env = _drlenv(*args, **kwargs)
+        except Exception as e:
+            print("\n********************** V2SimEnv Initialization Error **********************")
+            _drlenv.__exit(q)
+            print("***************************************************************************\n")
+            return
+        try:
+            env._mainloop(q)
+        except Exception as e:
+            print("\n************************ V2SimEnv Main Loop Error ************************")
+            _drlenv.__exit(q)
+            print("**************************************************************************\n")
 
 class V2SimEnv(gym.Env):
+    def __fetch(self, op:str, par) -> Any:
+        self._par.send((op,par))
+        self._par.poll()
+        ret = self._par.recv()
+        if isinstance(ret,str) and ret == '__error__':
+            raise RuntimeError("V2SimEnv encountered an error in the worker process.")
+        return ret
+    
     def __init__(self, 
             case_path:str,
             end_time:int,
@@ -229,14 +257,10 @@ class V2SimEnv(gym.Env):
 
         self.__rst_cnt = 0
 
-        self._par.send(('cf', None))
-        self._par.poll()
-        self.__cs_cnt = self._par.recv()
+        self.__cs_cnt = self.__fetch('cf', None)
         assert isinstance(self.__cs_cnt, int) and self.__cs_cnt > 0
 
-        self._par.send(('ce', None))
-        self._par.poll()
-        self.__e_cnt = self._par.recv()
+        self.__e_cnt = self.__fetch('ce', None)
         assert isinstance(self.__e_cnt, int) and self.__e_cnt > 0
 
         # Observation space: N dims of number of vehicles on the road, and M dims of number of vehicles in the FCS
@@ -258,9 +282,7 @@ class V2SimEnv(gym.Env):
 
     @property
     def ctime(self) -> int:
-        self._par.send(('ct', None))
-        self._par.poll()
-        return self._par.recv()
+        return self.__fetch('ct', None)
     
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
@@ -270,14 +292,10 @@ class V2SimEnv(gym.Env):
         return self._par.recv()
     
     def step(self, action:np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
-        self._par.send(('s', action))
-        self._par.poll()
-        return self._par.recv()
+        return self.__fetch('s', action)
     
     def observe(self) -> np.ndarray:
-        self._par.send(('o', None))
-        self._par.poll()
-        return self._par.recv()
+        return self.__fetch('o', None)
     
     def close(self):
         self._par.send(('q', None))
@@ -292,8 +310,8 @@ class V2SimEnv(gym.Env):
 gym.register(id="v2sim/v2simenv-v0", entry_point=V2SimEnv) # type:ignore
 
 if __name__ == "__main__":
-    import feasytools as ft
-    args = ft.ArgChecker()
+    from feasytools import ArgChecker
+    args = ArgChecker()
     mcase = args.pop_str("d", "drl_12nodes")
     et = args.pop_int("t", 129600)
     env = V2SimEnv(str(Path("./cases") / mcase), et)

@@ -318,7 +318,7 @@ if __name__ == '__main__':
     args = ArgChecker()
 
     # Case
-    G_CASE = args.pop_str("d", "drl_12nodes")
+    G_CASE = args.pop_str("d", "drl_2cs")
 
     # End time
     G_ET = args.pop_int("e", 129600)
