@@ -224,7 +224,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
                 if ep_len > 0 and cur_time - last_print_time > 1:
                     dur = cur_time - this_st
                     rem = dur / ep_len * (max_ep_len - ep_len)
-                    print(f"TestEp {j}: {ep_len}/{max_ep_len}, Used: {time2str(dur)}, EST: {time2str(rem)}", end = "\r")
+                    print(f"TestEp {j}: {ep_len}/{max_ep_len}, Used: {time2str(dur)}, EST: {time2str(rem)}         ", end = "\r")
                     last_print_time = cur_time
                 ep_ret += r
                 ep_len += 1
@@ -321,7 +321,7 @@ if __name__ == '__main__':
     G_CASE = args.pop_str("d", "drl_2cs")
 
     # End time
-    G_ET = args.pop_int("e", 129600)
+    G_ET = args.pop_int("e", 129600 + 2 * 3600)  # Default is 2 hours, can be adjusted
 
     # Traffic step
     G_TS = args.pop_int("ts", 15)

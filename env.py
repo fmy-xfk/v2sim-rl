@@ -4,6 +4,7 @@ Environment for the 12-node V2Sim case
 from itertools import chain
 from multiprocessing.connection import PipeConnection
 from pathlib import Path
+import shutil
 import time, random
 from typing import Any, Optional
 import gymnasium as gym
@@ -14,6 +15,8 @@ import multiprocessing as mp
 
 class _drlenv:
     def __create_inst(self):
+        pp = Path(self._res_path) / Path(self._case_path).name
+        shutil.rmtree(str(pp), ignore_errors=True)
         self._inst = v2sim.V2SimInstance(
             cfgdir = self._case_path,
             outdir = self._res_path, 
@@ -104,7 +107,7 @@ class _drlenv:
         return [c.veh_count() for c in self._inst.fcs]
     
     def _get_fcs_usage(self):
-        return [c.veh_count()/c.slots-1 for c in self._inst.fcs]
+        return [c.veh_count()/c.slots for c in self._inst.fcs]
     
     def _get_fcs_vcnt_wait(self):
         return [c.wait_count() for c in self._inst.fcs]
@@ -142,7 +145,7 @@ class _drlenv:
     def reset(self):
         if self._inst.is_working:
             self._inst.stop()
-            time.sleep(0.5) # Wait for the instance to stop. Never remove this line!
+            time.sleep(0.2) # Wait for the instance to stop. Never remove this line!
         self.__create_inst()
         self._t = 0
 
@@ -172,7 +175,7 @@ class _drlenv:
         # The more vehicle in FCSs and on roads, the more penalty
         reward = - (
             self._get_bus_overlim() * 1e5 +
-            sum(self._get_fcs_wait_rate()) * 100.0 +
+            sum(self._get_fcs_usage()) * 100.0 +
             sum(self._get_road_vcnt()) / 100.0
         )
 
@@ -234,7 +237,7 @@ class V2SimEnv(gym.Env):
         self._par.send((op,par))
         self._par.poll()
         ret = self._par.recv()
-        if isinstance(ret,str) and ret == '__error__':
+        if isinstance(ret, str) and ret == '__error__':
             raise RuntimeError("V2SimEnv encountered an error in the worker process.")
         return ret
     
@@ -242,7 +245,7 @@ class V2SimEnv(gym.Env):
             case_path:str,
             end_time:int,
             traffic_step:int = 15,
-            rl_step:int = 4,            
+            rl_step:int = 60,            
             res_path:str = "",
             road_cap:float = 100.0,
             SoC_change:bool = True,
@@ -313,7 +316,7 @@ if __name__ == "__main__":
     from feasytools import ArgChecker
     args = ArgChecker()
     mcase = args.pop_str("d", "drl_12nodes")
-    et = args.pop_int("t", 129600)
+    et = args.pop_int("t", 129600 + 2 * 3600)  # 2 hours
     env = V2SimEnv(str(Path("./cases") / mcase), et)
     #obs, _ = env.reset()
     #print(obs)

@@ -33,6 +33,5 @@ def find_progress_csv(directory):
                 progress_files.append(os.path.join(root, file))
     return progress_files
 
-# 示例：在当前目录及其子目录中查找 progress.csv 文件
-directory_to_search = "."  # 当前目录
+directory_to_search = "."
 result = find_progress_csv(directory_to_search)
