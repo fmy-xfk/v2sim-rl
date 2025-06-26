@@ -342,7 +342,7 @@ if __name__ == '__main__':
     seed = args.pop_int("s", 0)
     
     # Epochs
-    epochs = args.pop_int("epochs", 200)
+    epochs = args.pop_int("epochs", 50)
 
     from utils import setup_logger_kwargs
     logger_kwargs = setup_logger_kwargs(f"{G_CASE}_hid{hidden_size0}x{hidden_layer}_ep{epochs}", seed)

@@ -1,6 +1,7 @@
 '''
 Environment for the 12-node V2Sim case
 '''
+from collections import deque
 from itertools import chain
 from multiprocessing.connection import PipeConnection
 from pathlib import Path
@@ -29,6 +30,27 @@ class _drlenv:
             initial_state = self._case_state
         )
 
+        self._evlog:dict[str,tuple[float,int]] = {}
+        self._trip_speed:list[float] = []
+
+        def arrive_listener(simT:int, veh:v2sim.EV, _0):
+            nonlocal self
+            if veh.ID not in self._evlog: return
+            dist = veh.odometer - self._evlog[veh.ID][0]
+            t = simT - self._evlog[veh.ID][1]
+            if t > 0 and dist > 0:
+                self._trip_speed.append(dist / t)
+        
+        self._inst.trips_logger.add_arrive_listener(arrive_listener)
+        self._inst.trips_logger.add_arrive_cs_listener(arrive_listener)
+
+        def depart_listener(simT:int, veh:v2sim.EV, _0, _1 = None, _2 = None):
+            nonlocal self
+            self._evlog[veh.ID] = (0, simT)
+        
+        self._inst.trips_logger.add_depart_listener(depart_listener)
+        self._inst.trips_logger.add_depart_cs_listener(depart_listener)
+
         for ev in self._inst.vehicles.values():
             ev._w = 1e6
 
@@ -53,6 +75,10 @@ class _drlenv:
             self._buses = list(self._inst.pdn.Grid.Buses)
         else:
             self._buses = []
+        N = 5
+        self._csprice_history = deque(maxlen=N)
+        for _ in range(N):
+            self._csprice_history.append(self._get_fcs_price())
     
     def __init__(self, 
             case_path:str,
@@ -73,7 +99,27 @@ class _drlenv:
         self._rl_step = rl_step
         Path(self._res_path).mkdir(parents=True, exist_ok=True)
         self.__create_inst()
-        
+
+    def __cp_gini(self) -> float:
+        '''Gini coefficient of the charge prices in FCSs'''
+        t = self._inst.ctime
+        prices = np.array(sorted(c.pbuy(t) for c in self._inst.fcs))
+        if len(prices) == 0:
+            return 0.0
+        n = prices.shape[0]
+        index = np.arange(1, n + 1)
+        ret = (2 * np.sum(index * prices) / np.sum(prices) - (n + 1)) / n
+        if ret < 0 or ret > 1:
+            raise ValueError(f"Invalid Gini coefficient {ret} at time {t}. Prices: {prices}")
+        return ret
+    
+    def __nv_stddev(self) -> float:
+        '''Standard deviation of the number of vehicles in FCSs'''
+        veh_counts = np.array([c.veh_count() for c in self._inst.fcs])
+        if len(veh_counts) == 0:
+            return 0.0
+        return np.std(veh_counts).item()
+
     def _get_bus_overlim(self):
         s = 0.0
         for b in self._buses:
@@ -127,14 +173,19 @@ class _drlenv:
             if cnt == 0: ret.append(0)
             else: ret.append(sum_soc / cnt)
         return ret
+
+    def _get_fcs_price(self):
+        return [c.pbuy(self._inst.ctime) for c in self._inst.fcs]
     
     def _get_obs(self):
+        self._csprice_history.append(self._get_fcs_price())
         return np.array(
             list(chain(
                 self._get_road_density(),
                 self._get_road_avg_soc(),
                 self._get_fcs_usage(),
                 self._get_fcs_avg_soc(),
+                *self._csprice_history,
             )),
             dtype = np.float32
         )
@@ -153,10 +204,11 @@ class _drlenv:
         info = self._get_info()
 
         return observation, info
-    
+
     def step(self, action:np.ndarray):
         assert action.shape == (self._cs_cnt, )
         for i, v in enumerate(action):
+            assert v >= 0.01 and v <= 5.0, f"Invalid action value {v} at index {i}. Must be in [0.01, 5.0]. {action}"
             self._inst.fcs[i].pbuy.setOverride(v)
         try:
             self._t = self._inst.step_until(
@@ -172,12 +224,25 @@ class _drlenv:
             terminated = False
         truncated = False
 
-        # The more vehicle in FCSs and on roads, the more penalty
+        avg_tt = sum(self._trip_speed) / max(1, len(self._trip_speed))
         reward = - (
-            self._get_bus_overlim() * 1e5 +
-            sum(self._get_fcs_usage()) * 100.0 +
-            sum(self._get_road_vcnt()) / 100.0
+            1e5 * self._get_bus_overlim() +
+            10 * self.__cp_gini() +
+            self.__nv_stddev() +
+            avg_tt
         )
+
+        if reward > 0:
+            print(f"Warning: Positive reward {reward} at time {self._t}. This should not happen.")
+            print("Observation:", self._get_obs())
+            print("Bus overlim:", self._get_bus_overlim())
+            print("Gini Coefficient:", self.__cp_gini())
+            print("Standard Deviation of FCS Vehicles:", self.__nv_stddev())
+            print("Average Trip Speed:", avg_tt)
+            raise RuntimeError("Positive reward encountered, which is unexpected.")
+
+        #print(self._get_bus_overlim(), self.__cp_gini(), self.__nv_stddev(), len(self._trip_speed), avg_tt)
+        self._trip_speed.clear()
 
         observation = self._get_obs()
         info = self._get_info()
@@ -267,9 +332,9 @@ class V2SimEnv(gym.Env):
         assert isinstance(self.__e_cnt, int) and self.__e_cnt > 0
 
         # Observation space: N dims of number of vehicles on the road, and M dims of number of vehicles in the FCS
-        self.observation_space = gym.spaces.Box(-1.0, 5.0, (self.__e_cnt * 2 + self.__cs_cnt * 2,), seed = seed)
+        self.observation_space = gym.spaces.Box(-1.0, 5.0, (self.__e_cnt * 2 + self.__cs_cnt * (2+5),), seed = seed)
         # Action space: Price of the 12 FCS
-        self.action_space = gym.spaces.Box(0.0, 5.0, (self.__cs_cnt,), seed = seed)
+        self.action_space = gym.spaces.Box(0.01, 5.0, (self.__cs_cnt,), seed = seed)
     
     @property
     def reset_count(self):

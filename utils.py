@@ -240,7 +240,7 @@ class Logger:
             logger = EpochLogger(**logger_kwargs)
             logger.save_config(locals())
         """
-        config_json = convert_json(config)
+        config_json:dict = convert_json(config) # type: ignore
         if self.exp_name is not None:
             config_json['exp_name'] = self.exp_name
         output = json.dumps(config_json, separators=(',',':\t'), indent=4, sort_keys=True)
@@ -416,8 +416,8 @@ class EpochLogger(Logger):
             if not(average_only):
                 super().log_tabular('Std'+key, stats[1])
             if with_min_and_max:
-                super().log_tabular('Max'+key, stats[3])
-                super().log_tabular('Min'+key, stats[2])
+                super().log_tabular('Max'+key, stats[3]) # type: ignore
+                super().log_tabular('Min'+key, stats[2]) # type: ignore
         self.epoch_dict[key] = []
 
     def get_stats(self, key):

@@ -28,7 +28,7 @@ LOG_STD_MIN = -20
 
 class SquashedGaussianMLPActor(nn.Module):
 
-    def __init__(self, obs_dim:int, act_dim:int, hidden_sizes:Sequence[int], activation:Any, act_limit:float):
+    def __init__(self, obs_dim:int, act_dim:int, hidden_sizes:Sequence[int], activation:Any, act_limit:tuple[float, float]):
         super().__init__()
         self.net = mlp([obs_dim] + list(hidden_sizes), activation, activation)
         self.mu_layer = nn.Linear(hidden_sizes[-1], act_dim)
@@ -62,7 +62,7 @@ class SquashedGaussianMLPActor(nn.Module):
             logp_pi = None
 
         pi_action = torch.tanh(pi_action)
-        pi_action = self.act_limit * pi_action
+        pi_action = self.act_limit[0] + 0.5 * (pi_action + 1.0) * (self.act_limit[1] - self.act_limit[0])
 
         return pi_action, logp_pi
 
@@ -85,7 +85,7 @@ class MLPActorCritic(nn.Module):
         assert isinstance(observation_space, gym.spaces.Box)
         obs_dim = observation_space.shape[0]
         act_dim = action_space.shape[0]
-        act_limit = action_space.high[0]
+        act_limit = (action_space.low[0], action_space.high[0])
 
         # build policy and value functions
         self.pi = SquashedGaussianMLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit)
