@@ -25,17 +25,27 @@ def count_vars(module:nn.Module):
 
 LOG_STD_MAX = 2
 LOG_STD_MIN = -20
+NUM_LAYERS = 2
 
-class SquashedGaussianMLPActor(nn.Module):
+class Actor(nn.Module):
 
-    def __init__(self, obs_dim:int, act_dim:int, hidden_sizes:Sequence[int], activation:Any, act_limit:tuple[float, float]):
+    def __init__(self, state_dim:int, price_dim:int, act_dim:int, hidden_sizes:list[int], activation:Any, act_limit:tuple[float, float]):
         super().__init__()
-        self.net = mlp([obs_dim] + list(hidden_sizes), activation, activation)
-        self.mu_layer = nn.Linear(hidden_sizes[-1], act_dim)
-        self.log_std_layer = nn.Linear(hidden_sizes[-1], act_dim)
+        hidden_size = hidden_sizes[0]
+        hidden_size_last = hidden_sizes[-1]
+        self.state_net = nn.LSTM(input_size = state_dim, hidden_size = hidden_size, num_layers = NUM_LAYERS, batch_first=True)
+        self.price_net = nn.Linear(price_dim, hidden_size)
+        self.net = mlp([hidden_size * 2] + hidden_sizes, activation, activation)
+        self.mu_layer = nn.Linear(hidden_size_last, act_dim)
+        self.log_std_layer = nn.Linear(hidden_size_last, act_dim)
         self.act_limit = act_limit
 
     def forward(self, obs, deterministic=False, with_logprob=True):
+        # state input is (N, L, Hin), price input is (N, Hprice)
+        state_feature, (hn, cn) = self.state_net(obs["net"]) 
+        price_feature = self.price_net(obs["price"])
+        # Concatenate the last hidden state of LSTM and price feature
+        obs = torch.cat([hn[-1], price_feature], dim=-1)  # (Hout,)
         net_out = self.net(obs)
         mu = self.mu_layer(net_out)
         log_std = self.log_std_layer(net_out)
@@ -67,32 +77,52 @@ class SquashedGaussianMLPActor(nn.Module):
         return pi_action, logp_pi
 
 
-class MLPQFunction(nn.Module):
-    def __init__(self, obs_dim:int, act_dim:int, hidden_sizes:Iterable[int], activation:Any):
+class QFunction(nn.Module):
+    def __init__(self, state_dim:int, price_dim:int, act_dim:int, hidden_sizes:list[int], activation:Any):
         super().__init__()
-        self.q = mlp([obs_dim + act_dim] + list(hidden_sizes) + [1], activation)
+        hidden_size = hidden_sizes[0]
+        self.state_net = nn.LSTM(input_size = state_dim, hidden_size = hidden_size, num_layers = NUM_LAYERS, batch_first=True)
+        self.price_net = nn.Linear(price_dim, hidden_size)
+        self.q = mlp([hidden_size * 2 + act_dim] + hidden_sizes + [1], activation)
 
     def forward(self, obs, act):
-        q = self.q(torch.cat([obs, act], dim=-1))
+        # state input is (L, Hin), price input is (Hprice, )
+        state_feature, (hn, cn) = self.state_net(obs["net"]) 
+        price_feature = self.price_net(obs["price"])
+        # Concatenate the last hidden state of LSTM and price feature
+        q = self.q(torch.cat([hn[-1], price_feature, act], dim=-1))
         return torch.squeeze(q, -1) # Critical to ensure q has right shape.
 
 
-class MLPActorCritic(nn.Module):
-    def __init__(self, observation_space:gym.spaces.Space, action_space:gym.spaces.Box, hidden_sizes=(256,256),
+class ActorCritic(nn.Module):
+    def __init__(self, observation_space:gym.spaces.Space, action_space:gym.spaces.Space, hidden_sizes=(256,256),
                  activation=nn.ReLU):
         super().__init__()
 
-        assert isinstance(observation_space, gym.spaces.Box)
-        obs_dim = observation_space.shape[0]
+        assert isinstance(observation_space, gym.spaces.Dict), "Observation space must be a Dict space."
+        net_space = observation_space["net"]
+        assert (
+            isinstance(net_space, gym.spaces.Sequence) and 
+            isinstance(net_space.feature_space, gym.spaces.Box)
+        ), "Net observation space must be a Sequence space."
+        state_dim = net_space.feature_space.shape[0]
+
+        price_space = observation_space["price"]
+        assert isinstance(price_space, gym.spaces.Box), "Price observation space must be a Box space."
+        price_dim = price_space.shape[0]
+
+        assert isinstance(action_space, gym.spaces.Box), "Action space must be a Box space."
         act_dim = action_space.shape[0]
         act_limit = (action_space.low[0], action_space.high[0])
 
         # build policy and value functions
-        self.pi = SquashedGaussianMLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit)
-        self.q1 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
-        self.q2 = MLPQFunction(obs_dim, act_dim, hidden_sizes, activation)
+        self.pi = Actor(state_dim, price_dim, act_dim, hidden_sizes, activation, act_limit)
+        self.q1 = QFunction(state_dim, price_dim, act_dim, hidden_sizes, activation)
+        self.q2 = QFunction(state_dim, price_dim, act_dim, hidden_sizes, activation)
 
     def act(self, obs, deterministic=False):
+        obs["net"] = torch.as_tensor(obs["net"], dtype=torch.float32)
+        obs["price"] = torch.as_tensor(obs["price"], dtype=torch.float32)
         with torch.no_grad():
             a, _ = self.pi(obs, deterministic, False)
             a:torch.Tensor

@@ -1,5 +1,6 @@
 from copy import deepcopy
 import itertools
+from typing import Iterable
 import numpy as np
 import torch
 from torch.optim import Adam
@@ -9,45 +10,100 @@ import core
 from env import *
 from utils import EpochLogger, time2str
 
+OneBuffer = tuple[
+    ObsRes,     # obs
+    np.ndarray, # act
+    float,      # rew
+    ObsRes,     # next_obs
+    bool,       # done
+]
+
 class ReplayBuffer:
     """
     A simple FIFO experience replay buffer for SAC agents.
     """
 
-    def __init__(self, obs_dim, act_dim, size):
-        self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32) #type: ignore
-        self.obs2_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32) #type: ignore
-        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32) #type: ignore
-        self.rew_buf = np.zeros(size, dtype=np.float32)
-        self.done_buf = np.zeros(size, dtype=np.float32)
-        self.ptr, self.size, self.max_size = 0, 0, size
+    def __init__(self, size):
+        self._q:deque[OneBuffer] = deque(maxlen=size)
 
-    def store(self, obs, act, rew, next_obs, done):
-        self.obs_buf[self.ptr] = obs
-        self.obs2_buf[self.ptr] = next_obs
-        self.act_buf[self.ptr] = act
-        self.rew_buf[self.ptr] = rew
-        self.done_buf[self.ptr] = done
-        self.ptr = (self.ptr+1) % self.max_size
-        self.size = min(self.size+1, self.max_size)
+    def store(self, obs:ObsRes, act:np.ndarray, rew:float, next_obs:ObsRes, done:bool):
+        self._q.append((obs, act, rew, next_obs, done))
+    
+    @property
+    def size(self):
+        return len(self._q)
 
+    def __obs_cat(self, obs:Iterable[ObsRes]):
+        nets = []
+        prices = []
+        for o in obs:
+            nets.append(o["net"])
+            prices.append(o["price"])
+        return {
+            "net": torch.as_tensor(np.stack(nets, axis=0), dtype=torch.float32),
+            "price": torch.as_tensor(np.stack(prices, axis=0), dtype=torch.float32),
+        }
+    
     def sample_batch(self, batch_size=32):
         idxs = np.random.randint(0, self.size, size=batch_size)
-        batch = dict(obs=self.obs_buf[idxs],
-                     obs2=self.obs2_buf[idxs],
-                     act=self.act_buf[idxs],
-                     rew=self.rew_buf[idxs],
-                     done=self.done_buf[idxs])
-        return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in batch.items()}
+        sampled = [self._q[i] for i in idxs]
+        obs, act, rew, obs2, done = zip(*sampled)
+        batch = dict(
+            obs=self.__obs_cat(obs),
+            obs2=self.__obs_cat(obs2),
+            act=torch.as_tensor(np.stack(act, axis=0, dtype=np.float32), dtype=torch.float32),
+            rew=torch.as_tensor(np.stack(rew, axis=0, dtype=np.float32), dtype=torch.float32),
+            done=torch.as_tensor(np.stack(done, axis=0, dtype=np.float32), dtype=torch.float32),
+        )
+        return batch
 
 def create_env(obj):
     #return gym.make("Pendulum-v1")
     mcase = str(Path(__file__).parent / "cases" / G_CASE)
     return V2SimEnv(mcase, G_ET, G_TS, G_RLS, res_path=obj)
 
-def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
+def test_baseline(out_dir, num_test_episodes:int, max_ep_len:int):
+    test_env = create_env("./test_temp")
+    assert isinstance(test_env.action_space, gym.spaces.Box)
+    action = np.ones(test_env.action_space.shape, dtype=np.float32)
+    results = []
+    for j in range(num_test_episodes):
+        if j == 0:
+            o = test_env.observe()
+        else:
+            o, _ = test_env.reset()
+        d, ep_ret, ep_len = False, 0, 0
+        this_st = time.time()
+        last_print_time = -1
+        while not(d or (ep_len == max_ep_len)):
+            # Take deterministic actions at test time
+            o, r, d, _, _ = test_env.step(action)
+            cur_time = time.time()
+            if ep_len > 0 and cur_time - last_print_time > 1:
+                dur = cur_time - this_st
+                rem = dur / ep_len * (max_ep_len - ep_len)
+                print(f"Baseline, TestEp {j}: {ep_len}/{max_ep_len}   ", end = "\r")
+                last_print_time = cur_time
+            ep_ret += r
+            ep_len += 1
+        results.append((ep_ret, ep_len))
+    test_env.close()
+    print("\nBaseline test results:")
+    for i, (ret, length) in enumerate(results):
+        print(f"Episode {i+1}: Return = {ret:.2f}, Length = {length}")
+    print(f"Average Return = {np.mean([r for r, _ in results]):.2f}")
+    print(f"Max Return = {np.max([r for r, _ in results]):.2f}")
+    print(f"Min Return = {np.min([r for r, _ in results]):.2f}")
+
+    with open(out_dir + "/baseline_results.csv", "w") as f:
+        f.write("epret,eplen\n")
+        for ret, length in results:
+            f.write(f"{ret:.2f},{length}\n")
+
+
+def sac(actor_critic=core.ActorCritic, ac_kwargs=dict(),
         seed=0, 
-        steps_per_epoch=6000,   # Number of steps of interaction (state-action pairs) for the agent and the environment in each epoch
+        steps_per_epoch=5000,   # Number of steps of interaction (state-action pairs) for the agent and the environment in each epoch
         epochs=100,             # Number of epochs to run
         replay_size=int(1e6),   # Size of the replay buffer
         gamma=0.99,             # Discount factor
@@ -55,7 +111,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
         lr=1e-3,                # Learning rate for both actor and critic
         alpha=0.2,              # Entropy regularization coefficient
         adaptive_alpha=True,    # Whether to use adaptive entropy coefficient
-        batch_size=100,         # Number of episodes to optimize at the same time
+        batch_size=32,          # Number of episodes to optimize at the same time
         start_steps=10000,      # Number of steps for uniform-random action selection, before running real policy.
         update_after=1000,      # Number of env interactions to collect before starting to do gradient descent updates.
         update_every=50,        # Number of env interactions that should elapse between gradient descent updates.
@@ -89,7 +145,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
     q_params = itertools.chain(ac.q1.parameters(), ac.q2.parameters())
 
     # Experience buffer
-    replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
+    replay_buffer = ReplayBuffer(size=replay_size)
 
     # Count variables (protip: try to get a feel for how different size networks behave!)
     var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.q1, ac.q2])
@@ -203,7 +259,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
                 p_targ.data.add_((1 - polyak) * p.data)
 
     def get_action(o, deterministic=False):
-        return ac.act(torch.as_tensor(o, dtype=torch.float32), deterministic)
+        return ac.act(o, deterministic)
 
     def test_agent(num_test_episodes:int, max_ep_len:int):
         test_env = create_env("./test_temp")
@@ -218,13 +274,13 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
             last_print_time = -1
             while not(d or (ep_len == max_ep_len)):
                 # Take deterministic actions at test time
-                action = ac.act(torch.as_tensor(o, dtype=torch.float32), True)
+                action = ac.act(o, True)
                 o, r, d, _, _ = test_env.step(action)
                 cur_time = time.time()
                 if ep_len > 0 and cur_time - last_print_time > 1:
                     dur = cur_time - this_st
                     rem = dur / ep_len * (max_ep_len - ep_len)
-                    print(f"TestEp {j}: {ep_len}/{max_ep_len}, Used: {time2str(dur)}, EST: {time2str(rem)}         ", end = "\r")
+                    print(f"Epoch {test_count+1}, TestEp {j}: {ep_len}/{max_ep_len}, Used: {time2str(dur)}, EST: {time2str(rem)}         ", end = "\r")
                     last_print_time = cur_time
                 ep_ret += r
                 ep_len += 1
@@ -237,6 +293,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
     o = env.observe()
     ep_ret, ep_len = 0, 0
     
+    test_count = 0
     st_time = time.time()
     last_print_time = -1
     # Main loop: collect experience in env and update/log each epoch
@@ -245,7 +302,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
         if cur_time - last_print_time > 1 and t > 0:
             dur = cur_time - st_time
             rem = (total_steps - t) * (dur / t)
-            print(f"STEPS: {t}, SIM_TIME: {env.reset_count}-{env.ctime}, Used: {time2str(dur)}, EST: {time2str(rem)}  ", end="\r")
+            print(f"Epoch: {test_count+1}, Step: {t}, Time: {env.reset_count}-{env.ctime}, Used: {time2str(dur)}, EST: {time2str(rem)}   ", end="\r")
             last_print_time = cur_time
         # Until start_steps have elapsed, randomly sample actions
         # from a uniform distribution for better exploration. Afterwards, 
@@ -254,7 +311,6 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
             a = get_action(o)
         else:
             a = env.action_space.sample()
-        #print("Act=", a)
 
         # Step the env
         o2, r, d, _,  _ = env.step(a)
@@ -264,7 +320,7 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
         # Ignore the "done" signal if it comes from hitting the time
         # horizon (that is, when it's an artificial terminal signal
         # that isn't based on the agent's state)
-        d = False if ep_len==max_ep_len else d
+        d = False if ep_len == max_ep_len else d
 
         # Store experience to replay buffer
         replay_buffer.store(o, a, r, o2, d)
@@ -313,21 +369,25 @@ def sac(actor_critic=core.MLPActorCritic, ac_kwargs=dict(),
             logger.log_tabular('Time', time.time() - start_time)
             logger.dump_tabular()
 
+            test_count += 1
+
 if __name__ == '__main__':
     from feasytools import ArgChecker
     args = ArgChecker()
+
+    do_baseline = args.pop_bool("baseline")
 
     # Case
     G_CASE = args.pop_str("d", "drl_2cs")
 
     # End time
-    G_ET = args.pop_int("e", 129600 + 2 * 3600)  # Default is 2 hours, can be adjusted
+    G_ET = args.pop_int("e", 129600 + 4 * 3600)  # Default is 4 hours, can be adjusted
 
     # Traffic step
     G_TS = args.pop_int("ts", 15)
 
     # Reinforcement learning step: How many traffic steps per RL step
-    G_RLS = args.pop_int("rls", 4)
+    G_RLS = args.pop_int("rls", 20)
 
     # Road capacity
     G_RC = args.pop_float("rc", 100)
@@ -349,11 +409,14 @@ if __name__ == '__main__':
     
     torch.set_num_threads(torch.get_num_threads())
     
-    sac(
-        actor_critic=core.MLPActorCritic,
-        ac_kwargs=dict(hidden_sizes=[hidden_size0] * hidden_layer), 
-        gamma=args.pop_float("gamma", 0.99),
-        seed=seed,
-        epochs=epochs,
-        logger_kwargs=logger_kwargs
-    )
+    if do_baseline:
+        test_baseline(logger_kwargs["output_dir"], num_test_episodes=200, max_ep_len=1000)
+    else:
+        sac(
+            actor_critic=core.ActorCritic,
+            ac_kwargs=dict(hidden_sizes=[hidden_size0] * hidden_layer), 
+            gamma=args.pop_float("gamma", 0.99),
+            seed=seed,
+            epochs=epochs,
+            logger_kwargs=logger_kwargs
+        )

@@ -14,6 +14,8 @@ import libsumo, os
 import v2sim
 import multiprocessing as mp
 
+ObsRes = dict[str, np.ndarray]
+
 class _drlenv:
     def __create_inst(self):
         pp = Path(self._res_path) / Path(self._case_path).name
@@ -64,7 +66,7 @@ class _drlenv:
         self._inst.start()
         self._inst.step()
         self._enames = [e for e in self._inst.edge_names if not e.startswith("CS")]
-        self._t = 0
+        self._t = self._inst.ctime
         if self._inst.pdn:
             self._vmax = 0
             self._vmin = 1e6
@@ -75,10 +77,8 @@ class _drlenv:
             self._buses = list(self._inst.pdn.Grid.Buses)
         else:
             self._buses = []
-        N = 5
-        self._csprice_history = deque(maxlen=N)
-        for _ in range(N):
-            self._csprice_history.append(self._get_fcs_price())
+        self._state = []
+        self.__add_state()
     
     def __init__(self, 
             case_path:str,
@@ -120,7 +120,7 @@ class _drlenv:
             return 0.0
         return np.std(veh_counts).item()
 
-    def _get_bus_overlim(self):
+    def _bus_overlim(self):
         s = 0.0
         for b in self._buses:
             assert b.V is not None
@@ -130,14 +130,16 @@ class _drlenv:
                 s += self._vmin - b.V
         return s
     
-    def _get_road_vcnt(self):
+    @property
+    def road_vcnt(self):
         return (libsumo.edge.getLastStepVehicleNumber(e) for e in self._enames)
     
-    def _get_road_density(self):
+    @property
+    def road_density(self):
         return (libsumo.edge.getLastStepVehicleNumber(e)/self.road_cap for e in self._enames)
 
-    def _get_road_avg_soc(self):
-        ret = []
+    @property
+    def road_avg_soc(self):
         for e in self._enames:
             cnt = 0
             sum_soc = 0
@@ -145,24 +147,29 @@ class _drlenv:
                 v = self._inst.vehicles[vid]
                 sum_soc += v.SOC
                 cnt += 1
-            if cnt == 0: ret.append(0)
-            else: ret.append(sum_soc / cnt)
-        return ret
+            if cnt == 0: 
+                yield 0
+            else:
+                yield sum_soc / cnt
     
-    def _get_fcs_vcnt(self):
-        return [c.veh_count() for c in self._inst.fcs]
+    @property
+    def fcs_vcnt(self):
+        return (c.veh_count() for c in self._inst.fcs)
     
-    def _get_fcs_usage(self):
-        return [c.veh_count()/c.slots for c in self._inst.fcs]
+    @property
+    def fcs_usage(self):
+        return (c.veh_count()/c.slots for c in self._inst.fcs)
     
-    def _get_fcs_vcnt_wait(self):
-        return [c.wait_count() for c in self._inst.fcs]
+    @property
+    def fcs_vcnt_wait(self):
+        return (c.wait_count() for c in self._inst.fcs)
     
-    def _get_fcs_wait_rate(self):
-        return [c.wait_count()/c.slots for c in self._inst.fcs]
+    @property
+    def fcs_wait_rate(self):
+        return (c.wait_count()/c.slots for c in self._inst.fcs)
     
-    def _get_fcs_avg_soc(self):
-        ret = []
+    @property
+    def fcs_avg_soc(self):
         for c in self._inst.fcs:
             cnt = 0
             sum_soc = 0
@@ -170,25 +177,27 @@ class _drlenv:
                 v = self._inst.vehicles[vid]
                 sum_soc += v.SOC
                 cnt += 1
-            if cnt == 0: ret.append(0)
-            else: ret.append(sum_soc / cnt)
-        return ret
+            if cnt == 0: 
+                yield 0
+            else: 
+                yield sum_soc / cnt
 
-    def _get_fcs_price(self):
-        return [c.pbuy(self._inst.ctime) for c in self._inst.fcs]
+    @property
+    def fcs_price(self):
+        return (c.pbuy(self._inst.ctime) for c in self._inst.fcs)
+    
+    @property
+    def fcs_load(self):
+        return (c.Pc_MW for c in self._inst.fcs)
     
     def _get_obs(self):
-        self._csprice_history.append(self._get_fcs_price())
-        return np.array(
-            list(chain(
-                self._get_road_density(),
-                self._get_road_avg_soc(),
-                self._get_fcs_usage(),
-                self._get_fcs_avg_soc(),
-                *self._csprice_history,
-            )),
-            dtype = np.float32
-        )
+        while len(self._state) < self._rl_step:
+            self.__add_state()
+        ret = {
+            "net": np.stack(self._state), 
+            "price": np.fromiter(self.fcs_price, dtype=np.float32)
+        }
+        return ret
     
     def _get_info(self):
         return {}
@@ -205,43 +214,47 @@ class _drlenv:
 
         return observation, info
 
+    def __add_state(self):
+        state = np.fromiter(chain(
+            self.road_density,
+            self.road_avg_soc,
+            self.fcs_usage,
+            self.fcs_avg_soc,
+            self.fcs_load,
+        ), dtype=np.float32)
+        self._state.append(state)
+    
     def step(self, action:np.ndarray):
         assert action.shape == (self._cs_cnt, )
         for i, v in enumerate(action):
-            assert v >= 0.01 and v <= 5.0, f"Invalid action value {v} at index {i}. Must be in [0.01, 5.0]. {action}"
+            assert v >= 0.00 and v <= 5.0, f"Invalid action value {v} at index {i}. Must be in [0.00, 5.0]. {action}"
             self._inst.fcs[i].pbuy.setOverride(v)
-        try:
-            self._t = self._inst.step_until(
-                self._t + self._traffic_step * self._rl_step
-            )
-        except Exception as e:
-            print("\nV2SimEnv Error @", self._t)
-            raise e
+        time_to = self._t + self._traffic_step * self._rl_step
+
+        self._state.clear()
+        while self._t < time_to:
+            try:
+                self._t = self._inst.step()
+            except Exception as e:
+                print("\nV2SimEnv Error @", self._t)
+                raise e
+            self.__add_state()
+        
         if self._t >= self._inst.etime:
             terminated = True
-            #self._inst.stop()
         else:
             terminated = False
         truncated = False
 
-        avg_tt = sum(self._trip_speed) / max(1, len(self._trip_speed))
+        avg_ts = sum(self._trip_speed) / max(1, len(self._trip_speed))
+
         reward = - (
-            1e5 * self._get_bus_overlim() +
+            1e5 * self._bus_overlim() +
             10 * self.__cp_gini() +
-            self.__nv_stddev() +
-            avg_tt
-        )
+            self.__nv_stddev()
+        ) + (avg_ts - 12) * 10
+        #print(self._bus_overlim(), self.__cp_gini(), self.__nv_stddev(), (avg_ts - 12) * 20, reward)
 
-        if reward > 0:
-            print(f"Warning: Positive reward {reward} at time {self._t}. This should not happen.")
-            print("Observation:", self._get_obs())
-            print("Bus overlim:", self._get_bus_overlim())
-            print("Gini Coefficient:", self.__cp_gini())
-            print("Standard Deviation of FCS Vehicles:", self.__nv_stddev())
-            print("Average Trip Speed:", avg_tt)
-            raise RuntimeError("Positive reward encountered, which is unexpected.")
-
-        #print(self._get_bus_overlim(), self.__cp_gini(), self.__nv_stddev(), len(self._trip_speed), avg_tt)
         self._trip_speed.clear()
 
         observation = self._get_obs()
@@ -303,14 +316,14 @@ class V2SimEnv(gym.Env):
         self._par.poll()
         ret = self._par.recv()
         if isinstance(ret, str) and ret == '__error__':
-            raise RuntimeError("V2SimEnv encountered an error in the worker process.")
+            raise RuntimeError("V2SimEnv encountered an error in the worker process. See the details above.")
         return ret
     
     def __init__(self, 
             case_path:str,
             end_time:int,
             traffic_step:int = 15,
-            rl_step:int = 60,            
+            rl_step:int = 40,            
             res_path:str = "",
             road_cap:float = 100.0,
             SoC_change:bool = True,
@@ -332,9 +345,14 @@ class V2SimEnv(gym.Env):
         assert isinstance(self.__e_cnt, int) and self.__e_cnt > 0
 
         # Observation space: N dims of number of vehicles on the road, and M dims of number of vehicles in the FCS
-        self.observation_space = gym.spaces.Box(-1.0, 5.0, (self.__e_cnt * 2 + self.__cs_cnt * (2+5),), seed = seed)
-        # Action space: Price of the 12 FCS
-        self.action_space = gym.spaces.Box(0.01, 5.0, (self.__cs_cnt,), seed = seed)
+        net_state_dim = self.__e_cnt * 2 + self.__cs_cnt * 3
+        self.observation_space = gym.spaces.Dict({
+            "net": gym.spaces.Sequence(gym.spaces.Box(-1.0, 10.0, (net_state_dim,)), stack = True, seed = seed),
+            "price": gym.spaces.Box(0.0, 5.0, (self.__cs_cnt,), seed = seed),
+        })
+        
+        # Action space: Price of all the FCS
+        self.action_space = gym.spaces.Box(0.0, 5.0, (self.__cs_cnt,), seed = seed)
     
     @property
     def reset_count(self):
@@ -352,17 +370,17 @@ class V2SimEnv(gym.Env):
     def ctime(self) -> int:
         return self.__fetch('ct', None)
     
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> tuple[np.ndarray, dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> tuple[ObsRes, dict]:
         super().reset(seed=seed)
         self._par.send(('r', None))
         self.__rst_cnt += 1
         self._par.poll()
         return self._par.recv()
     
-    def step(self, action:np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict]:
+    def step(self, action:np.ndarray) -> tuple[ObsRes, float, bool, bool, dict]:
         return self.__fetch('s', action)
     
-    def observe(self) -> np.ndarray:
+    def observe(self) -> ObsRes:
         return self.__fetch('o', None)
     
     def close(self):
@@ -380,14 +398,14 @@ gym.register(id="v2sim/v2simenv-v0", entry_point=V2SimEnv) # type:ignore
 if __name__ == "__main__":
     from feasytools import ArgChecker
     args = ArgChecker()
-    mcase = args.pop_str("d", "drl_12nodes")
-    et = args.pop_int("t", 129600 + 2 * 3600)  # 2 hours
+    mcase = args.pop_str("d", "drl_2cs")
+    et = args.pop_int("t", 129600 + 4 * 3600)  # 4 hours
     env = V2SimEnv(str(Path("./cases") / mcase), et)
     #obs, _ = env.reset()
     #print(obs)
     terminated = False
-    price = np.array([1.0]*env.cs_count)
+    price = 5 * np.random.random((env.cs_count,)).astype(np.float32)
     while not terminated:
         obs, reward, terminated, _, _ = env.step(price)
-        print(env.ctime, reward)
+        print(env.ctime, reward, obs["net"].shape, obs["price"].shape)
     env.close()
