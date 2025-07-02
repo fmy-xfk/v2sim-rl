@@ -1,5 +1,6 @@
 from copy import deepcopy
 import itertools
+from collections import deque
 from typing import Iterable
 import numpy as np
 import torch
@@ -68,10 +69,7 @@ def test_baseline(out_dir, num_test_episodes:int, max_ep_len:int):
     action = np.ones(test_env.action_space.shape, dtype=np.float32)
     results = []
     for j in range(num_test_episodes):
-        if j == 0:
-            o = test_env.observe()
-        else:
-            o, _ = test_env.reset()
+        o, _ = test_env.reset()
         d, ep_ret, ep_len = False, 0, 0
         this_st = time.time()
         last_print_time = -1
@@ -103,7 +101,7 @@ def test_baseline(out_dir, num_test_episodes:int, max_ep_len:int):
 
 def sac(actor_critic=core.ActorCritic, ac_kwargs=dict(),
         seed=0, 
-        steps_per_epoch=5000,   # Number of steps of interaction (state-action pairs) for the agent and the environment in each epoch
+        steps_per_epoch=1000,   # Number of steps of interaction (state-action pairs) for the agent and the environment in each epoch
         epochs=100,             # Number of epochs to run
         replay_size=int(1e6),   # Size of the replay buffer
         gamma=0.99,             # Discount factor
@@ -111,11 +109,11 @@ def sac(actor_critic=core.ActorCritic, ac_kwargs=dict(),
         lr=1e-3,                # Learning rate for both actor and critic
         alpha=0.2,              # Entropy regularization coefficient
         adaptive_alpha=True,    # Whether to use adaptive entropy coefficient
-        batch_size=32,          # Number of episodes to optimize at the same time
-        start_steps=10000,      # Number of steps for uniform-random action selection, before running real policy.
-        update_after=1000,      # Number of env interactions to collect before starting to do gradient descent updates.
+        batch_size=50,          # Number of episodes to optimize at the same time
+        start_steps=1000,       # Number of steps for uniform-random action selection, before running real policy.
+        update_after=500,       # Number of env interactions to collect before starting to do gradient descent updates.
         update_every=50,        # Number of env interactions that should elapse between gradient descent updates.
-        num_test_episodes=10,   # Number of episodes to test the deterministic policy at the end of each epoch.
+        num_test_episodes=1,    # Number of episodes to test the deterministic policy at the end of each epoch.
         max_ep_len=1000,        # Maximum length of trajectory / episode / rollout
         logger_kwargs=dict()):
     logger = EpochLogger(**logger_kwargs)
@@ -265,10 +263,7 @@ def sac(actor_critic=core.ActorCritic, ac_kwargs=dict(),
         test_env = create_env("./test_temp")
         print("\n")
         for j in range(num_test_episodes):
-            if j == 0:
-                o = test_env.observe()
-            else:
-                o, _ = test_env.reset()
+            o, _ = test_env.reset()
             d, ep_ret, ep_len = False, 0, 0
             this_st = time.time()
             last_print_time = -1
@@ -290,7 +285,7 @@ def sac(actor_critic=core.ActorCritic, ac_kwargs=dict(),
     # Prepare for interaction with environment
     total_steps = steps_per_epoch * epochs
     start_time = time.time()
-    o = env.observe()
+    o, _ = env.reset()
     ep_ret, ep_len = 0, 0
     
     test_count = 0
@@ -381,13 +376,13 @@ if __name__ == '__main__':
     G_CASE = args.pop_str("d", "drl_2cs")
 
     # End time
-    G_ET = args.pop_int("e", 129600 + 4 * 3600)  # Default is 4 hours, can be adjusted
+    G_ET = args.pop_int("e", 115200 + 4 * 3600)  # Default is 4 hours, can be adjusted
 
     # Traffic step
     G_TS = args.pop_int("ts", 15)
 
     # Reinforcement learning step: How many traffic steps per RL step
-    G_RLS = args.pop_int("rls", 20)
+    G_RLS = args.pop_int("rls", 40)
 
     # Road capacity
     G_RC = args.pop_float("rc", 100)
@@ -410,7 +405,7 @@ if __name__ == '__main__':
     torch.set_num_threads(torch.get_num_threads())
     
     if do_baseline:
-        test_baseline(logger_kwargs["output_dir"], num_test_episodes=200, max_ep_len=1000)
+        test_baseline(logger_kwargs["output_dir"], num_test_episodes=1, max_ep_len=1000)
     else:
         sac(
             actor_critic=core.ActorCritic,

@@ -1,20 +1,19 @@
 '''
 Environment for the 12-node V2Sim case
 '''
-from collections import deque
 from itertools import chain
 from multiprocessing.connection import PipeConnection
 from pathlib import Path
 import shutil
 import time, random
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 import gymnasium as gym
 import numpy as np
 import libsumo, os
 import v2sim
 import multiprocessing as mp
 
-ObsRes = dict[str, np.ndarray]
+ObsRes = Dict[str, np.ndarray]
 
 class _drlenv:
     def __create_inst(self):
@@ -28,7 +27,7 @@ class _drlenv:
             end_time = self._end_time,
             log = "",
             silent = True,
-            seed = random.randint(0, 1000000),
+            seed = 0, # random.randint(0, 1000000),
             initial_state = self._case_state
         )
 
@@ -53,17 +52,15 @@ class _drlenv:
         self._inst.trips_logger.add_depart_listener(depart_listener)
         self._inst.trips_logger.add_depart_cs_listener(depart_listener)
 
-        for ev in self._inst.vehicles.values():
-            ev._w = 1e6
-
         if self._SoC_change:
             # Randomize the initial state of SoC
             for ev in self._inst.vehicles.values():
-                ev._elec *= random.uniform(0.8, 1.2)
+                ev._elec *= random.uniform(0.95, 1.05)
                 ev._elec = min(ev._elec, ev._bcap)
                 ev._elec = max(ev._elec, 0.0)
         self._cs_cnt = len(self._inst.fcs)
         self._inst.start()
+        self._start_time = self._inst.ctime
         self._inst.step()
         self._enames = [e for e in self._inst.edge_names if not e.startswith("CS")]
         self._t = self._inst.ctime
@@ -87,7 +84,7 @@ class _drlenv:
             rl_step:int = 4,
             res_path:str = "",
             road_cap:float = 500.0,
-            SoC_change:bool = True
+            SoC_change:bool = False
         ):
         self._SoC_change = SoC_change
         self.road_cap = road_cap
@@ -99,6 +96,7 @@ class _drlenv:
         self._rl_step = rl_step
         Path(self._res_path).mkdir(parents=True, exist_ok=True)
         self.__create_inst()
+        
 
     def __cp_gini(self) -> float:
         '''Gini coefficient of the charge prices in FCSs'''
@@ -115,10 +113,17 @@ class _drlenv:
     
     def __nv_stddev(self) -> float:
         '''Standard deviation of the number of vehicles in FCSs'''
-        veh_counts = np.array([c.veh_count() for c in self._inst.fcs])
+        veh_counts = np.fromiter((c.veh_count() for c in self._inst.fcs), dtype=np.float32)
         if len(veh_counts) == 0:
             return 0.0
         return np.std(veh_counts).item()
+    
+    def __pc_stddev(self) -> float:
+        '''Standard deviation of the power consumption in FCSs'''
+        pc_MW = np.fromiter((c.Pc_MW for c in self._inst.fcs), dtype=np.float32)
+        if len(pc_MW) == 0:
+            return 0.0
+        return np.std(pc_MW).item()
 
     def _bus_overlim(self):
         s = 0.0
@@ -195,7 +200,7 @@ class _drlenv:
             self.__add_state()
         ret = {
             "net": np.stack(self._state), 
-            "price": np.fromiter(self.fcs_price, dtype=np.float32)
+            "price": np.fromiter(chain([self.ctime01],self.fcs_price), dtype=np.float32)
         }
         return ret
     
@@ -214,8 +219,13 @@ class _drlenv:
 
         return observation, info
 
+    @property
+    def ctime01(self) -> float:
+        return (self._inst.ctime - self._start_time) / (self._end_time - self._start_time)
+    
     def __add_state(self):
         state = np.fromiter(chain(
+            [self.ctime01],
             self.road_density,
             self.road_avg_soc,
             self.fcs_usage,
@@ -227,7 +237,7 @@ class _drlenv:
     def step(self, action:np.ndarray):
         assert action.shape == (self._cs_cnt, )
         for i, v in enumerate(action):
-            assert v >= 0.00 and v <= 5.0, f"Invalid action value {v} at index {i}. Must be in [0.00, 5.0]. {action}"
+            assert v >= 0.0 and v <= 5.0, f"Invalid action value {v} at index {i}. Must be in [0.0, 5.0]. {action}"
             self._inst.fcs[i].pbuy.setOverride(v)
         time_to = self._t + self._traffic_step * self._rl_step
 
@@ -246,13 +256,9 @@ class _drlenv:
             terminated = False
         truncated = False
 
-        avg_ts = sum(self._trip_speed) / max(1, len(self._trip_speed))
+        #avg_ts = sum(self._trip_speed) / max(1, len(self._trip_speed))
 
-        reward = - (
-            1e5 * self._bus_overlim() +
-            10 * self.__cp_gini() +
-            self.__nv_stddev()
-        ) + (avg_ts - 12) * 10
+        reward = - self.__nv_stddev() - self.__pc_stddev() * 10
         #print(self._bus_overlim(), self.__cp_gini(), self.__nv_stddev(), (avg_ts - 12) * 20, reward)
 
         self._trip_speed.clear()
@@ -347,8 +353,8 @@ class V2SimEnv(gym.Env):
         # Observation space: N dims of number of vehicles on the road, and M dims of number of vehicles in the FCS
         net_state_dim = self.__e_cnt * 2 + self.__cs_cnt * 3
         self.observation_space = gym.spaces.Dict({
-            "net": gym.spaces.Sequence(gym.spaces.Box(-1.0, 10.0, (net_state_dim,)), stack = True, seed = seed),
-            "price": gym.spaces.Box(0.0, 5.0, (self.__cs_cnt,), seed = seed),
+            "net": gym.spaces.Sequence(gym.spaces.Box(-1.0, 10.0, (1 + net_state_dim,)), stack = True, seed = seed),
+            "price": gym.spaces.Box(0.0, 5.0, (1 + self.__cs_cnt,), seed = seed),
         })
         
         # Action space: Price of all the FCS
@@ -370,14 +376,14 @@ class V2SimEnv(gym.Env):
     def ctime(self) -> int:
         return self.__fetch('ct', None)
     
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> tuple[ObsRes, dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[ObsRes, dict]:
         super().reset(seed=seed)
         self._par.send(('r', None))
         self.__rst_cnt += 1
         self._par.poll()
         return self._par.recv()
     
-    def step(self, action:np.ndarray) -> tuple[ObsRes, float, bool, bool, dict]:
+    def step(self, action:np.ndarray) -> Tuple[ObsRes, float, bool, bool, dict]:
         return self.__fetch('s', action)
     
     def observe(self) -> ObsRes:
@@ -399,13 +405,16 @@ if __name__ == "__main__":
     from feasytools import ArgChecker
     args = ArgChecker()
     mcase = args.pop_str("d", "drl_2cs")
-    et = args.pop_int("t", 129600 + 4 * 3600)  # 4 hours
+    et = args.pop_int("t", 115200 + 4 * 3600)  # 4 hours
     env = V2SimEnv(str(Path("./cases") / mcase), et)
     #obs, _ = env.reset()
     #print(obs)
     terminated = False
-    price = 5 * np.random.random((env.cs_count,)).astype(np.float32)
+    price = np.array([1, 1], dtype=np.float32)  # Example price for 2 FCSs
+    ep_ret = 0.0
     while not terminated:
         obs, reward, terminated, _, _ = env.step(price)
         print(env.ctime, reward, obs["net"].shape, obs["price"].shape)
+        ep_ret += reward
+    print(f"Episode return: {ep_ret}")
     env.close()

@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2025-07-02 13:49:11 by Eclipse SUMO netedit Version 1.23.1
+-->
+
+<additional xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/additional_file.xsd">
+    <!-- Shapes -->
+    <poly id="po_0" color="255,195,188" fill="1" layer="0.00" shape="-103.931182,-98.384526 -24.550154,-98.963950 -21.073612,-188.195179 -103.062047,-184.139214"/>
+    <poly id="po_1" color="255,195,188" fill="1" layer="0.00" shape="93.941965,-100.412508 206.060425,-100.991932 207.508984,-171.681607 95.680236,-167.046219"/>
+    <poly id="po_10" color="208,255,188" fill="1" layer="0.00" shape="-11.225054,-98.806678 -11.926157,-162.256455 82.021580,-167.164173 82.021580,-100.559434"/>
+    <poly id="po_11" color="188,236,255" fill="1" layer="0.00" shape="-12.311164,108.339648 -12.311164,26.205488 79.077549,24.277456 80.619975,107.954041"/>
+    <poly id="po_12" color="188,236,255" fill="1" layer="0.00" shape="93.730592,105.640403 92.188166,23.891850 202.857198,23.506244 200.543560,104.483584"/>
+    <poly id="po_13" color="188,236,255" fill="1" layer="0.00" shape="212.882964,105.254797 215.582209,22.349424 300.801219,23.120637 297.330762,107.568435"/>
+    <poly id="po_15" color="188,236,255" fill="1" layer="0.00" shape="44.025751,-178.256288 46.358670,-241.245091 140.141998,-241.245091 134.076410,-180.122623"/>
+    <poly id="po_2" color="255,195,188" fill="1" layer="0.00" shape="210.985526,122.086141 306.880126,119.478735 306.590414,179.159362 213.013508,179.449074"/>
+    <poly id="po_3" color="255,244,188" fill="1" layer="0.00" shape="-13.541106,11.126528 80.904935,10.257393 80.904935,-85.057784 -11.802835,-84.478360"/>
+    <poly id="po_4" color="255,244,188" fill="1" layer="0.00" shape="-105.379741,143.814524 -24.550154,141.496830 -23.970730,24.742982 -110.884265,21.556152"/>
+    <poly id="po_5" color="255,244,188" fill="1" layer="0.00" shape="91.107036,10.293103 204.094632,10.819851 206.728375,-89.525775 94.267529,-89.525775"/>
+    <poly id="po_6" color="255,244,188" fill="1" layer="0.00" shape="305.461832,-98.634035 217.679162,-99.503170 218.548297,-174.248810 308.648662,-173.379675"/>
+    <poly id="po_7" color="208,255,188" fill="1" layer="0.00" shape="-85.632182,12.598377 -24.502995,11.729241 -23.344148,-87.352188 -83.314487,-86.193341 -122.425578,-29.989255"/>
+    <poly id="po_8" color="208,255,188" fill="1" layer="0.00" shape="309.479498,113.303019 320.932007,-198.459742 422.307926,-197.187241 413.400418,115.848021"/>
+    <poly id="po_9" color="208,255,188" fill="1" layer="0.00" shape="203.541926,121.294641 -18.006468,123.748500 -18.006468,189.301585 206.346336,189.301585"/>
+    <!-- TAZs -->
+    <taz id="taz_0" shape="244.15,145.70 244.63,121.27 269.05,121.51 268.57,145.22 244.15,145.70" color="red">
+        <tazSource id="-E41" weight="1.00"/>
+        <tazSink id="-E41" weight="1.00"/>
+        <tazSource id="E41" weight="1.00"/>
+        <tazSink id="E41" weight="1.00"/>
+    </taz>
+    <taz id="taz_1" shape="243.91,103.56 246.06,84.16 271.44,85.60 270.24,103.56 243.91,103.56" color="red">
+        <tazSource id="-E31" weight="1.00"/>
+        <tazSink id="-E31" weight="1.00"/>
+        <tazSource id="E31" weight="1.00"/>
+        <tazSink id="E31" weight="1.00"/>
+    </taz>
+    <taz id="taz_10" shape="77.78,-183.38 102.59,-183.60 103.46,-201.23 78.21,-201.23 77.78,-183.38" color="red">
+        <tazSource id="-E62" weight="1.00"/>
+        <tazSink id="-E62" weight="1.00"/>
+        <tazSource id="E62" weight="1.00"/>
+        <tazSink id="E62" weight="1.00"/>
+    </taz>
+    <taz id="taz_11" shape="187.04,-123.52 206.85,-123.09 207.07,-148.99 186.83,-148.34 187.04,-123.52" color="red">
+        <tazSource id="-E42" weight="1.00"/>
+        <tazSink id="-E42" weight="1.00"/>
+        <tazSource id="E42" weight="1.00"/>
+        <tazSink id="E42" weight="1.00"/>
+    </taz>
+    <taz id="taz_12" shape="223.18,-122.87 243.86,-122.22 244.51,-149.86 222.74,-150.73 223.18,-122.87" color="red">
+        <tazSource id="-E36" weight="1.00"/>
+        <tazSink id="-E36" weight="1.00"/>
+        <tazSource id="E36" weight="1.00"/>
+        <tazSink id="E36" weight="1.00"/>
+    </taz>
+    <taz id="taz_13" shape="322.43,-80.64 322.00,-108.51 343.11,-107.63 342.02,-80.21 322.43,-80.64" color="red">
+        <tazSource id="-E39" weight="1.00"/>
+        <tazSink id="-E39" weight="1.00"/>
+        <tazSource id="E39" weight="1.00"/>
+        <tazSink id="E39" weight="1.00"/>
+    </taz>
+    <taz id="taz_14" shape="321.56,-161.83 322.21,-192.52 343.33,-189.91 340.72,-163.79 321.56,-161.83" color="red">
+        <tazSource id="-E40" weight="1.00"/>
+        <tazSink id="-E40" weight="1.00"/>
+        <tazSource id="E40" weight="1.00"/>
+        <tazSink id="E40" weight="1.00"/>
+    </taz>
+    <taz id="taz_15" shape="-41.31,128.65 -24.89,129.24 -25.68,99.76 -42.50,100.55 -41.31,128.65" color="red">
+        <tazSource id="-O1" weight="1.00"/>
+        <tazSink id="-O1" weight="1.00"/>
+        <tazSource id="O1" weight="1.00"/>
+        <tazSink id="O1" weight="1.00"/>
+    </taz>
+    <taz id="taz_16" shape="-101.46,44.55 -101.07,24.17 -76.93,26.15 -78.91,44.94 -101.46,44.55" color="red">
+        <tazSource id="-E33" weight="1.00"/>
+        <tazSink id="-E33" weight="1.00"/>
+        <tazSource id="E33" weight="1.00"/>
+        <tazSink id="E33" weight="1.00"/>
+    </taz>
+    <taz id="taz_17" shape="-99.68,-99.11 -77.92,-100.10 -77.52,-119.69 -99.29,-118.50 -99.68,-99.11" color="red">
+        <tazSource id="-E34" weight="1.00"/>
+        <tazSink id="-E34" weight="1.00"/>
+        <tazSource id="E34" weight="1.00"/>
+        <tazSink id="E34" weight="1.00"/>
+    </taz>
+    <taz id="taz_19" shape="-50.27,-18.92 -34.04,-17.14 -33.65,-45.63 -50.86,-44.25 -50.27,-18.92" color="red">
+        <tazSource id="-E3" weight="1.00"/>
+        <tazSink id="-E3" weight="1.00"/>
+        <tazSource id="E3" weight="1.00"/>
+        <tazSink id="E3" weight="1.00"/>
+    </taz>
+    <taz id="taz_2" shape="336.33,25.26 320.29,25.50 320.76,1.08 341.83,2.99 336.33,25.26" color="red">
+        <tazSource id="-E38" weight="1.00"/>
+        <tazSink id="-E38" weight="1.00"/>
+        <tazSource id="E38" weight="1.00"/>
+        <tazSink id="E38" weight="1.00"/>
+    </taz>
+    <taz id="taz_3" shape="178.70,-28.17 180.01,-51.03 199.60,-50.16 198.51,-27.95 178.70,-28.17" color="red">
+        <tazSource id="-E61" weight="1.00"/>
+        <tazSink id="-E61" weight="1.00"/>
+        <tazSource id="E61" weight="1.00"/>
+        <tazSink id="E61" weight="1.00"/>
+    </taz>
+    <taz id="taz_4" shape="75.60,148.99 76.25,128.75 100.41,127.88 96.28,147.90 75.60,148.99" color="red">
+        <tazSource id="-R2" weight="1.00"/>
+        <tazSink id="-R2" weight="1.00"/>
+        <tazSource id="R2" weight="1.00"/>
+        <tazSink id="R2" weight="1.00"/>
+    </taz>
+    <taz id="taz_5" shape="54.05,90.01 54.70,61.06 78.21,64.54 74.29,90.44 54.05,90.01" color="red">
+        <tazSource id="-R1" weight="1.00"/>
+        <tazSink id="-R1" weight="1.00"/>
+        <tazSource id="R1" weight="1.00"/>
+        <tazSink id="R1" weight="1.00"/>
+    </taz>
+    <taz id="taz_6" shape="98.67,87.83 97.80,60.62 118.70,63.67 116.30,89.35 98.67,87.83" color="red">
+        <tazSource id="-W#" weight="1.00"/>
+        <tazSink id="-W#" weight="1.00"/>
+        <tazSource id="W3" weight="1.00"/>
+        <tazSink id="W3" weight="1.00"/>
+    </taz>
+    <taz id="taz_7" shape="42.08,-1.85 77.78,-1.20 78.87,-55.61 42.52,-53.22 42.08,-1.85" color="red">
+        <tazSource id="-W1" weight="1.00"/>
+        <tazSink id="-W1" weight="1.00"/>
+        <tazSource id="-W2" weight="1.00"/>
+        <tazSink id="-W2" weight="1.00"/>
+        <tazSource id="E47" weight="1.00"/>
+        <tazSink id="E47" weight="1.00"/>
+        <tazSource id="E48" weight="1.00"/>
+        <tazSink id="E48" weight="1.00"/>
+        <tazSource id="E49" weight="1.00"/>
+        <tazSink id="E49" weight="1.00"/>
+        <tazSource id="W1" weight="1.00"/>
+        <tazSink id="W1" weight="1.00"/>
+        <tazSource id="W2" weight="1.00"/>
+        <tazSink id="W2" weight="1.00"/>
+    </taz>
+    <taz id="taz_8" shape="24.45,-105.02 50.57,-105.02 47.74,-126.14 24.67,-125.70 24.45,-105.02" color="red">
+        <tazSource id="-E64" weight="1.00"/>
+        <tazSink id="-E64" weight="1.00"/>
+        <tazSource id="E64" weight="1.00"/>
+        <tazSink id="E64" weight="1.00"/>
+    </taz>
+    <taz id="taz_9" shape="-38.89,-158.13 -23.22,-158.13 -23.22,-182.29 -37.37,-181.21 -38.89,-158.13" color="red">
+        <tazSource id="-E56" weight="1.00"/>
+        <tazSink id="-E56" weight="1.00"/>
+        <tazSource id="E56" weight="1.00"/>
+        <tazSink id="E56" weight="1.00"/>
+    </taz>
+</additional>
