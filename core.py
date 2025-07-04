@@ -151,7 +151,7 @@ class QFunctionLSTM(QFunctionBase):
         q = self.q(torch.cat([hn[-1], price_feature, act], dim=-1))
         return torch.squeeze(q, -1) # Critical to ensure q has right shape.
 
-class SquashedGaussianMLPActor(ActorBase):
+class ActorMLP(ActorBase):
     def __init__(self, state_dim:int, price_dim:int, act_dim:int, hidden_sizes:list[int], activation:Any, act_limit:tuple[float, float]):
         super().__init__(state_dim, price_dim, act_dim, hidden_sizes, activation, act_limit)
         self.net = mlp([state_dim + price_dim] + hidden_sizes, activation, activation)
@@ -160,7 +160,9 @@ class SquashedGaussianMLPActor(ActorBase):
         self.act_limit = act_limit
 
     def forward(self, obs, deterministic=False, with_logprob=True):
-        net_out = self.net(torch.cat((obs["net"][:,-1,:], obs["price"]), dim=-1))  # Concatenate last state and price
+        # Take the last element along the second to last dimension of obs["net"], keeping other dimensions unchanged
+        obs_net_last = obs["net"].select(dim=-2, index=-1)
+        net_out = self.net(torch.cat((obs_net_last, obs["price"]), dim=-1))  # Concatenate last state and price
         mu = self.mu_layer(net_out)
         log_std = self.log_std_layer(net_out)
         log_std = torch.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
@@ -191,18 +193,19 @@ class SquashedGaussianMLPActor(ActorBase):
         return pi_action, logp_pi
 
 
-class MLPQFunction(QFunctionBase):
+class QFunctionMLP(QFunctionBase):
     def __init__(self, state_dim:int, price_dim:int, act_dim:int, hidden_sizes:list[int], activation:Any):
         super().__init__(state_dim, price_dim, act_dim, hidden_sizes, activation)  # price_dim is not used in MLPQFunction
         self.q = mlp([state_dim + price_dim + act_dim] + hidden_sizes + [1], activation)
 
     def forward(self, obs, act):
-        q = self.q(torch.cat([obs["net"][:,-1,:], obs["price"], act], dim=-1))
+        obs_net_last = obs["net"].select(dim=-2, index=-1)
+        q = self.q(torch.cat([obs_net_last, obs["price"], act], dim=-1))
         return torch.squeeze(q, -1) # Critical to ensure q has right shape.
 
 class ActorCritic(nn.Module):
     def __init__(self, observation_space:gym.spaces.Space, action_space:gym.spaces.Space, hidden_sizes=(256,256),
-                 activation=nn.ReLU, actor=SquashedGaussianMLPActor, q_function=MLPQFunction):
+                 activation=nn.ReLU, actor:type = ActorMLP, q_function:type = QFunctionMLP):
         super().__init__()
 
         assert isinstance(observation_space, gym.spaces.Dict), "Observation space must be a Dict space."
@@ -222,9 +225,9 @@ class ActorCritic(nn.Module):
         act_limit = (action_space.low[0], action_space.high[0])
 
         # build policy and value functions
-        self.pi = actor(state_dim, price_dim, act_dim, hidden_sizes, activation, act_limit)
-        self.q1 = q_function(state_dim, price_dim, act_dim, hidden_sizes, activation)
-        self.q2 = q_function(state_dim, price_dim, act_dim, hidden_sizes, activation)
+        self.pi:ActorBase = actor(state_dim, price_dim, act_dim, hidden_sizes, activation, act_limit)
+        self.q1:QFunctionBase = q_function(state_dim, price_dim, act_dim, hidden_sizes, activation)
+        self.q2:QFunctionBase = q_function(state_dim, price_dim, act_dim, hidden_sizes, activation)
 
     def act(self, obs, deterministic=False):
         obs["net"] = torch.as_tensor(obs["net"], dtype=torch.float32)

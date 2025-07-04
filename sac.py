@@ -99,7 +99,7 @@ def test_baseline(out_dir, num_test_episodes:int, max_ep_len:int):
             f.write(f"{ret:.2f},{length}\n")
 
 
-def sac(actor_critic=core.ActorCritic, ac_kwargs=dict(),
+def sac(actor_critic:str, ac_kwargs=dict(),
         seed=0, 
         steps_per_epoch=1000,   # Number of steps of interaction (state-action pairs) for the agent and the environment in each epoch
         epochs=100,             # Number of epochs to run
@@ -132,7 +132,14 @@ def sac(actor_critic=core.ActorCritic, ac_kwargs=dict(),
     act_limit = env.action_space.high[0]
 
     # Create actor-critic module and target networks
-    ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+    if actor_critic == "MLP":
+        ac = core.ActorCritic(env.observation_space, env.action_space, **ac_kwargs, 
+            actor=core.ActorMLP, q_function=core.QFunctionMLP)
+    elif actor_critic == "LSTM":
+        ac = core.ActorCritic(env.observation_space, env.action_space, **ac_kwargs,
+            actor=core.ActorLSTM, q_function=core.QFunctionLSTM)
+    else:
+        raise ValueError(f"Unknown actor-critic type: {actor_critic}")
     ac_targ = deepcopy(ac)
 
     # Freeze target networks with respect to optimizers (only update via polyak averaging)
@@ -399,8 +406,14 @@ if __name__ == '__main__':
     # Epochs
     epochs = args.pop_int("epochs", 50)
 
+    # Model type
+    model = args.pop_str("m", "MLP")
+
+    assert model in ("MLP", "LSTM"), "Model type must be either 'MLP' or 'LSTM'."
+
+
     from utils import setup_logger_kwargs
-    logger_kwargs = setup_logger_kwargs(f"{G_CASE}_hid{hidden_size0}x{hidden_layer}_ep{epochs}", seed)
+    logger_kwargs = setup_logger_kwargs(f"{G_CASE}_{model}_ep{epochs}", seed)
     
     torch.set_num_threads(torch.get_num_threads())
     
@@ -408,7 +421,7 @@ if __name__ == '__main__':
         test_baseline(logger_kwargs["output_dir"], num_test_episodes=1, max_ep_len=1000)
     else:
         sac(
-            actor_critic=core.ActorCritic,
+            actor_critic=model,
             ac_kwargs=dict(hidden_sizes=[hidden_size0] * hidden_layer), 
             gamma=args.pop_float("gamma", 0.99),
             seed=seed,

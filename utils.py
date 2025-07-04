@@ -73,7 +73,7 @@ def is_json_serializable(v):
         return False
     
 
-def setup_logger_kwargs(exp_name, seed=None, data_dir=None, datestamp=False):
+def setup_logger_kwargs(exp_name, seed=None, data_dir=None, datestamp=True):
     """
     Sets up the output_dir for a logger and returns a dict for logger kwargs.
 

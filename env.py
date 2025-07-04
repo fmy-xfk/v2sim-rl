@@ -116,14 +116,14 @@ class _drlenv:
         veh_counts = np.fromiter((c.veh_count() for c in self._inst.fcs), dtype=np.float32)
         if len(veh_counts) == 0:
             return 0.0
-        return np.std(veh_counts).item()
+        return (np.max(veh_counts) - np.min(veh_counts)).item()
     
     def __pc_stddev(self) -> float:
         '''Standard deviation of the power consumption in FCSs'''
         pc_MW = np.fromiter((c.Pc_MW for c in self._inst.fcs), dtype=np.float32)
         if len(pc_MW) == 0:
             return 0.0
-        return np.std(pc_MW).item()
+        return (np.max(pc_MW) - np.min(pc_MW)).item()
 
     def _bus_overlim(self):
         s = 0.0
@@ -208,9 +208,7 @@ class _drlenv:
         return {}
     
     def reset(self):
-        if self._inst.is_working:
-            self._inst.stop()
-            time.sleep(0.2) # Wait for the instance to stop. Never remove this line!
+        self.close()
         self.__create_inst()
         self._t = 0
 
@@ -219,6 +217,11 @@ class _drlenv:
 
         return observation, info
 
+    def close(self):
+        if self._inst.is_working:
+            self._inst.stop()
+            time.sleep(0.2) # Wait for the instance to stop. Never remove this line!
+    
     @property
     def ctime01(self) -> float:
         return (self._inst.ctime - self._start_time) / (self._end_time - self._start_time)
@@ -287,6 +290,8 @@ class _drlenv:
             elif op == 'ce':
                 q.send(len(self._enames))
             elif op == 'q':
+                self.close()
+                q.send('__done__')
                 break
             else:
                 raise ValueError(f"Unknown operation {op}")
@@ -390,7 +395,7 @@ class V2SimEnv(gym.Env):
         return self.__fetch('o', None)
     
     def close(self):
-        self._par.send(('q', None))
+        self.__fetch('q', None)
     
     def __del__(self):
         try:
@@ -401,20 +406,57 @@ class V2SimEnv(gym.Env):
     
 gym.register(id="v2sim/v2simenv-v0", entry_point=V2SimEnv) # type:ignore
 
+def removeprefix(s:str, prefix:str) -> str:
+    if s.startswith(prefix):
+        return s[len(prefix):]
+    return s
+
+def removesuffix(s:str, suffix:str) -> str:
+    if s.endswith(suffix):
+        return s[:-len(suffix)]
+    return s
+
 if __name__ == "__main__":
     from feasytools import ArgChecker
     args = ArgChecker()
     mcase = args.pop_str("d", "drl_2cs")
+    verbose = args.pop_bool("verbose")
     et = args.pop_int("t", 115200 + 4 * 3600)  # 4 hours
-    env = V2SimEnv(str(Path("./cases") / mcase), et)
+    price_str = args.pop_str("p", "1.0")
+    output = args.pop_str("o", "")
+    suffix = args.pop_int("s", 0)
+    res_path = f"./env_temp/{mcase}_{suffix}"
+    env = V2SimEnv(str(Path("./cases") / mcase), et, res_path=res_path)
     #obs, _ = env.reset()
     #print(obs)
     terminated = False
-    price = np.array([1, 1], dtype=np.float32)  # Example price for 2 FCSs
+    try:
+        p = float(price_str)
+        assert p >= 0.0 and p <= 5.0, f"Invalid price {p}. Must be in [0.0, 5.0]."
+        assert env.action_space.shape is not None
+        price = np.ones(env.action_space.shape, dtype=np.float32) * p
+    except ValueError:
+        price_arr = removesuffix(removeprefix(price_str.strip(),"["),"]").split(",")
+        try:
+            price = np.array([float(x.strip()) for x in price_arr], dtype=np.float32)
+        except:
+            raise ValueError(f"Invalid price string {price_str}. Must be a float or a list of floats in [0.0, 5.0].")
     ep_ret = 0.0
     while not terminated:
         obs, reward, terminated, _, _ = env.step(price)
-        print(env.ctime, reward, obs["net"].shape, obs["price"].shape)
+        if verbose: print(env.ctime, reward, obs["net"].shape, obs["price"].shape)
         ep_ret += reward
-    print(f"Episode return: {ep_ret}")
+    price_list = list(price)
+    print(f"Price: {price_list}, Episode return: {ep_ret:.2f}")
+    if output != "":
+        # 等待文件解锁
+        while True:
+            try:
+                with open(output, "a") as f:
+                    price_str = ';'.join(map(str, price_list))
+                    f.write(f"{price_str},{ep_ret}\n")
+                break
+            except PermissionError:
+                time.sleep(0.1)
     env.close()
+    shutil.rmtree(res_path, ignore_errors=True)
