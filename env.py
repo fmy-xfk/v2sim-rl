@@ -97,30 +97,14 @@ class _drlenv:
         self._rl_step = rl_step
         Path(self._res_path).mkdir(parents=True, exist_ok=True)
         self.__create_inst()
-        
-
-    def __cp_gini(self) -> float:
-        '''Gini coefficient of the charge prices in FCSs'''
-        t = self._inst.ctime
-        prices = np.array(sorted(c.pbuy(t) for c in self._inst.fcs))
-        if len(prices) == 0:
-            return 0.0
-        n = prices.shape[0]
-        index = np.arange(1, n + 1)
-        ret = (2 * np.sum(index * prices) / np.sum(prices) - (n + 1)) / n
-        if ret < 0 or ret > 1:
-            raise ValueError(f"Invalid Gini coefficient {ret} at time {t}. Prices: {prices}")
-        return ret
     
-    def __nv_stddev(self) -> float:
-        '''Standard deviation of the number of vehicles in FCSs'''
+    def __nv_diff(self) -> float:
         veh_counts = np.fromiter((c.veh_count() for c in self._inst.fcs), dtype=np.float32)
         if len(veh_counts) == 0:
             return 0.0
         return (np.max(veh_counts) - np.min(veh_counts)).item()
     
-    def __pc_stddev(self) -> float:
-        '''Standard deviation of the power consumption in FCSs'''
+    def __pc_diff(self) -> float:
         pc_MW = np.fromiter((c.Pc_MW for c in self._inst.fcs), dtype=np.float32)
         if len(pc_MW) == 0:
             return 0.0
@@ -260,10 +244,7 @@ class _drlenv:
             terminated = False
         truncated = False
 
-        #avg_ts = sum(self._trip_speed) / max(1, len(self._trip_speed))
-
-        reward = - self.__nv_stddev() - self.__pc_stddev() * 10
-        #print(self._bus_overlim(), self.__cp_gini(), self.__nv_stddev(), (avg_ts - 12) * 20, reward)
+        reward = - self.__nv_diff() - self.__pc_diff() * 10 - self._bus_overlim() * 1e8
 
         self._trip_speed.clear()
 
