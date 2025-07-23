@@ -1,15 +1,14 @@
+# 这是《最优化理论及其在电力系统中的应用》的课程作业！
+
 # V2Sim-RL 在V2Sim平台上进行强化学习
 
 从前有一个平台，叫V2Sim，用于交通网和配电网的联合仿真。
 
-现在，要搞一个深度强化学习算法，为充电站自动定价，从而防止电压电流越限、减少排队长度、缓解路网拥堵等。
-
+现在，要搞一个深度强化学习算法，为充电站自动定价，从而使得充电负荷均匀分布。
 这个仓库就是为了这个目的设计的。
 
 ### 环境配置
-需要Python 3.12版本（必须恰好是3.12.x版本，不能是3.13这样的更高版本），因此建议开一个虚拟环境。
-
-然后安装v2sim-rl的依赖包：
+需要Python 3.12版本，然后安装v2sim-rl的依赖包：
 ```bash
 # 安装v2sim-rl的依赖。执行以下命令之前，确保你在V2Sim-RL的文件夹里面
 pip install -r requirements.txt
@@ -30,17 +29,21 @@ python setup.py develop
 ```
 
 ### 项目结构
-+ 主程序是`sac.py`(从spinningup里面copy过来修改的)，输入`python sac.py`以运行，使用了Soft Actor-Critic算法
-+ V2Sim环境是`env.py`
-+ SAC的核心程序在`core.py`(从spinningup里面copy过来的)
-+ 绘图程序是`plot.py`，直接运行就会为所有仿真结果绘图，绘图就在结果文件夹里面，请手动打开
-+ 其他杂项在`utils.py`里面(从spinningup里面copy过来修改的)
++ 主程序是`sac.py`(从spinningup里面copy过来修改的)，使用了Soft Actor-Critic算法：
+  - 输入`python sac.py`以运行;
+  - `sac.py`包含2种模型，一种是标准SAC：`python sac.py -m MLP`；另一种是LSTM-SAC：`python sac.py -m LSTM`；
+  - `d`参数可以切换算例，例如：`python -d drl_2cs`
+  - `epochs`参数可以改变epoch数量
++ V2Sim环境是`env.py`，直接运行可以看到价格恒为1.0时的return；
+  - 使用`search.py`进行网格搜索法，不建议在超过3个充电站的时候使用，因为可能要几个月甚至几年才能跑完；
++ 绘图程序是`plot.py`和`plot_all.py`
+  - 运行`plot.py`就会为所有仿真结果绘图，绘图就在结果文件夹里面，请手动打开；
+  - 运行`plot_all.pu`会绘制不同仿真结果的对比图；
++ 其他杂项在`utils.py`里面。
 
 ### 参数说明
-+ observation: 每条道路的车辆密度(`车辆数/给定容量`) + 每条道路上车辆的平均SoC + 每个充电站排队情况(`总车辆数/充电桩数-1`) + 每个充电中中车辆的平均SoC。
-+ action: 一个向量，每一维从0.0~5.0，表示充电站的定价。
-+ reward: `-(总电压越限*1e5 + 各站排队比例之和*100 + 正在行驶的车辆数/100)`, 其中`排队比例 = 等待车辆数/充电桩数`。
++ observation: 请看`env.py`第230行的函数；
++ action: 一个向量，每一维从0.0~5.0，表示充电站的定价；
++ reward: `-(充电站排队数量极差 + 10 * 充电站负荷极差)`。
 
-Actor网络和Critic网络的结构都是多层感知器(MLP)。可以通过命令行修改MLP的隐含层的维度和层数，例如`python sac.py -hid 128 -l 3`表示隐含层数为3，每层128个神经元。默认为2层，每层256个神经元。
-
-V2Sim仿真步长15s，作为DRL的环境的步长60s(即V2Sim走4步)。
+V2Sim仿真步长15s，作为DRL的环境的步长600s(即V2Sim走20步)。

@@ -43,7 +43,7 @@ class _drlenv:
                 self._trip_speed.append(dist / t)
         
         self._inst.trips_logger.add_arrive_listener(arrive_listener)
-        self._inst.trips_logger.add_arrive_cs_listener(arrive_listener)
+        self._inst.trips_logger.add_arrive_fcs_listener(arrive_listener)
 
         def depart_listener(simT:int, veh:v2sim.EV, _0, _1 = None, _2 = None):
             nonlocal self
@@ -61,6 +61,7 @@ class _drlenv:
         self._cs_cnt = len(self._inst.fcs)
         self._inst.start()
         self._start_time = self._inst.ctime
+        assert self._start_time < self._end_time, f"Start time {self._start_time} must be less than end time {self._end_time}."
         self._inst.step()
         self._enames = [e for e in self._inst.edge_names if not e.startswith("CS")]
         self._t = self._inst.ctime
@@ -419,7 +420,7 @@ def removesuffix(s:str, suffix:str) -> str:
 if __name__ == "__main__":
     from feasytools import ArgChecker
     args = ArgChecker()
-    mcase = args.pop_str("d", "drl_2cs")
+    mcase = args.pop_str("d", "drl_12nodes")
     verbose = args.pop_bool("verbose")
     et = args.pop_int("t", 115200 + 4 * 3600)  # 4 hours
     price_str = args.pop_str("p", "1.0")

@@ -4,6 +4,7 @@
 *data*
 *.docx
 results*
+preference.v2simcfg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

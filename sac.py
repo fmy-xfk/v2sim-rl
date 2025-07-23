@@ -380,7 +380,7 @@ if __name__ == '__main__':
     do_baseline = args.pop_bool("baseline")
 
     # Case
-    G_CASE = args.pop_str("d", "drl_2cs")
+    G_CASE = args.pop_str("d", "drl_12nodes")
 
     # End time
     G_ET = args.pop_int("e", 115200 + 4 * 3600)  # Default is 4 hours, can be adjusted

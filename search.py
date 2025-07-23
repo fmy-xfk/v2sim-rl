@@ -43,7 +43,7 @@ def search(case:str, n_dim:int = 2, prices:List[float] = [1,2], output:str = "./
 if __name__ == "__main__":
     from feasytools import ArgChecker
     parser = ArgChecker()
-    case = parser.pop_str("case", default="drl_2cs")
+    case = parser.pop_str("case", default="drl_12nodes")
     n_dim = parser.pop_int("n_dim", default=2)
     prices = eval(parser.pop_str("prices", default="[1, 2, 3, 4, 5]"))
     output = parser.pop_str("output", default="./data/search_results.csv")
