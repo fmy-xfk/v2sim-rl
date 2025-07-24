@@ -1,4 +1,0 @@
-Home:taz_19,taz_8,taz_4,taz_2,taz_13,taz_14
-Work:taz_15,taz_7,taz_16,taz_3,taz_12
-Relax:taz_5,taz_6,taz_1,taz_10
-Other:taz_9,taz_17,taz_11,taz_0

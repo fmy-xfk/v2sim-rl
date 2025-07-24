@@ -51,5 +51,5 @@ def find_progress_csv(directory):
                 progress_files.append(os.path.join(root, file))
     return progress_files
 
-directory_to_search = "./data_drl12nodes"
+directory_to_search = "."
 result = find_progress_csv(directory_to_search)

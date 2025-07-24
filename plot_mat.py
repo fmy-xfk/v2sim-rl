@@ -1,12 +1,12 @@
 import numpy as np
-
 import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = ['Times New Roman', 'SimSun']  # 设置中文字体为黑体
 plt.rcParams['axes.unicode_minus'] = False    # 正常显示负号
 plt.rcParams['font.size'] = 14
 
+DATA_DIR = "./data/..."
 a = np.zeros((5,5), dtype=np.float32)
-with open("data_drl2cs/search_results.csv") as fp:
+with open(f"{DATA_DIR}/search_results.csv") as fp:
     fp.readline()
     for ln in fp:
         pr, ret = ln.strip().split(",")

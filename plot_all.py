@@ -66,5 +66,5 @@ def find_progress_csv(directory):
     )
     return progress_files
 
-directory_to_search = "./data_drl2cs"
+directory_to_search = "."
 result = find_progress_csv(directory_to_search)
